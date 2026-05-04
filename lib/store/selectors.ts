@@ -65,3 +65,55 @@ export function useStablePublisher(code: string): (msg: ProgressMsg) => Promise<
     };
   }, [code]);
 }
+
+export interface RoundStanding {
+  team: Team;
+  wins: number;
+  // Round indices where this team won (for tooltip / breakdown UIs).
+  wonRounds: number[];
+}
+
+/**
+ * Standings ordered by round wins (descending). Teams with zero wins still
+ * appear, sorted alphabetically as a stable secondary key. Use for the
+ * heptathlon scoreboard.
+ */
+export function useRoundStandings(): RoundStanding[] {
+  const teams = useToastyStore((s) => s.teams);
+  const event = useToastyStore((s) => s.event);
+
+  return useMemo(() => {
+    const winnerEntries = event?.roundWinners ?? [];
+    const winsByTeam = new Map<string, number[]>();
+    winnerEntries.forEach((w, idx) => {
+      const arr = winsByTeam.get(w.teamId) ?? [];
+      arr.push(idx);
+      winsByTeam.set(w.teamId, arr);
+    });
+    return Object.values(teams)
+      .map((team) => ({
+        team,
+        wins: (winsByTeam.get(team.id) ?? []).length,
+        wonRounds: winsByTeam.get(team.id) ?? [],
+      }))
+      .sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        return a.team.name.localeCompare(b.team.name);
+      });
+  }, [teams, event]);
+}
+
+/**
+ * Lookup: roundIndex -> winning team id. Stable identity across renders if
+ * roundWinners hasn't changed.
+ */
+export function useRoundWinnerByIndex(): Record<number, string> {
+  const event = useToastyStore((s) => s.event);
+  return useMemo(() => {
+    const out: Record<number, string> = {};
+    (event?.roundWinners ?? []).forEach((w, idx) => {
+      out[idx] = w.teamId;
+    });
+    return out;
+  }, [event]);
+}
