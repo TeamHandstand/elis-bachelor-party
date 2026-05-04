@@ -19,6 +19,8 @@ import type {
   EventConfig,
   EventStatus,
   Player,
+  RoundStatus,
+  RoundWinnerEntry,
   Team,
 } from "@/lib/types";
 import { generateEventCode } from "@/lib/utils/code";
@@ -45,6 +47,13 @@ export function eventRowToConfig(row: EventRow): EventConfig {
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
     winnerTeamId: row.winnerTeamId,
+    hostPlayerId: row.hostPlayerId,
+    currentRoundIndex: row.currentRoundIndex,
+    currentRoundStatus: (row.currentRoundStatus as RoundStatus | null) ?? null,
+    currentRoundStartsAt: row.currentRoundStartsAt
+      ? row.currentRoundStartsAt.getTime()
+      : null,
+    roundWinners: (row.roundWinners as RoundWinnerEntry[]) ?? [],
   };
 }
 
