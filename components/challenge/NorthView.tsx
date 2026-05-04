@@ -2,12 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useToastyStore } from "@/lib/store";
+import { useTeammates } from "@/lib/store/selectors";
 import { usePublisher } from "@/lib/store/bootstrap";
 
 interface Props {
   code: string;
   myPlayerId: string;
 }
+
+const TICK_COUNT = 24;
 
 // Read the device's compass heading (degrees clockwise from north).
 // iOS provides webkitCompassHeading (already true heading); Android exposes
@@ -64,14 +67,20 @@ export function NorthView({ code, myPlayerId }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
+  const teammates = useTeammates();
 
   const [liveHeading, setLiveHeading] = useState<number | null>(null);
   const [permError, setPermError] = useState(false);
-  const [result, setResult] = useState<{ heading: number; err: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submittedLocally, setSubmittedLocally] = useState(false);
   const liveListenerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(null);
 
-  const myGuess = myProgress?.north.guesses?.find((g) => g.playerId === myPlayerId);
+  const guesses = myProgress?.north.guesses ?? [];
+  const myGuess = guesses.find((g) => g.playerId === myPlayerId);
+  const iGuessed = !!myGuess || submittedLocally;
+  const allGuessed =
+    teammates.length > 0 &&
+    teammates.every((p) => guesses.some((g) => g.playerId === p.id));
 
   // Live compass display
   useEffect(() => {
@@ -118,7 +127,7 @@ export function NorthView({ code, myPlayerId }: Props) {
   }, []);
 
   async function submitGuess() {
-    if (!myTeamId || myGuess || submitting) return;
+    if (!myTeamId || iGuessed || submitting) return;
     setSubmitting(true);
     let heading = liveHeading;
     if (heading === null) {
@@ -130,7 +139,7 @@ export function NorthView({ code, myPlayerId }: Props) {
       return;
     }
     const err = angularError(heading);
-    setResult({ heading, err });
+    setSubmittedLocally(true);
     publisher({
       kind: "guess",
       playerId: myPlayerId,
@@ -143,78 +152,127 @@ export function NorthView({ code, myPlayerId }: Props) {
   }
 
   const dialRotation = liveHeading === null ? 0 : -liveHeading;
-  const alreadyGuessed = !!myGuess;
 
   return (
     <div className="flex flex-col items-center flex-1 p-6 text-center">
       <div className="text-xs uppercase tracking-widest opacity-60 mb-2">
-        Point the top of your phone at TRUE NORTH. Then GUESS.
+        Aim the top of your phone where you think TRUE NORTH is. Lock in.
       </div>
       <div className="text-sm mb-6 font-bold">
-        Lower error = better. Used as tiebreaker.
+        No cheats. No labels. Just vibes.
       </div>
 
       <div className="relative w-64 h-64 my-2">
-        <div className="absolute inset-0 rounded-full bg-bg-card border-2 border-accent-orange/40" />
-        <div
+        <div className="absolute inset-0 rounded-full bg-bg-card border-2 border-accent-orange/30" />
+        {/* Rotating tick ring — uniform marks only, no cardinal letters */}
+        <svg
+          viewBox="0 0 100 100"
           className="absolute inset-0 transition-transform duration-100"
           style={{ transform: `rotate(${dialRotation}deg)` }}
         >
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 text-accent-pink font-extrabold text-2xl">
-            N
-          </div>
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 opacity-50 font-bold">
-            S
-          </div>
-          <div className="absolute left-2 top-1/2 -translate-y-1/2 opacity-50 font-bold">
-            W
-          </div>
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-50 font-bold">
-            E
-          </div>
-        </div>
+          {Array.from({ length: TICK_COUNT }).map((_, i) => {
+            const angle = (i * 360) / TICK_COUNT;
+            // 0° at top → use angle - 90 in radians
+            const a = (angle - 90) * (Math.PI / 180);
+            const r1 = 47;
+            const r2 = 41;
+            const x1 = 50 + Math.cos(a) * r1;
+            const y1 = 50 + Math.sin(a) * r1;
+            const x2 = 50 + Math.cos(a) * r2;
+            const y2 = 50 + Math.sin(a) * r2;
+            return (
+              <line
+                key={i}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke="rgba(255,255,255,0.45)"
+                strokeWidth={1}
+                strokeLinecap="round"
+              />
+            );
+          })}
+        </svg>
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-4xl">🧭</div>
         </div>
         {/* Phone-pointer indicator (always points up - represents the phone's top edge) */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1 h-6 bg-accent-orange rounded-b" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1 h-7 bg-accent-orange rounded-b" />
       </div>
 
-      <div className="font-display text-3xl font-extrabold tabular-nums mt-2">
-        {liveHeading === null ? "--" : `${Math.round(liveHeading)}°`}
-      </div>
-      <div className="text-[10px] uppercase tracking-widest opacity-60">
-        current heading
+      <div className="text-[10px] uppercase tracking-widest opacity-50 mt-2">
+        the orange notch = top of your phone
       </div>
 
-      {alreadyGuessed ? (
-        <div className="mt-6 px-6 py-4 rounded-2xl bg-bg-card">
-          <div className="text-xs uppercase tracking-widest opacity-60">
-            you guessed
-          </div>
-          <div className="font-display text-4xl font-extrabold text-accent-orange">
-            {myGuess.errorDeg.toFixed(0)}°
-          </div>
-          <div className="text-xs opacity-70">error from north</div>
-        </div>
-      ) : result ? (
-        <div className="mt-6 px-6 py-4 rounded-2xl bg-gradient-party">
-          <div className="text-xs uppercase tracking-widest opacity-90">
-            {result.err < 15 ? "DAMN, NICE" : result.err < 45 ? "decent" : "lol"}
-          </div>
-          <div className="font-display text-4xl font-extrabold">
-            {result.err.toFixed(0)}° off
-          </div>
-        </div>
-      ) : (
+      {!iGuessed ? (
         <button
           type="button"
           onClick={submitGuess}
           disabled={submitting || liveHeading === null}
           className="mt-6 px-10 py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
         >
-          {submitting ? "..." : "GUESS"}
+          {submitting ? "..." : "LOCK IN"}
         </button>
+      ) : !allGuessed ? (
+        <div className="mt-6 px-5 py-4 rounded-2xl bg-bg-card w-full max-w-xs">
+          <div className="text-xs uppercase tracking-widest opacity-60 mb-1">
+            you locked in
+          </div>
+          <div className="font-display text-base font-extrabold mb-3">
+            🤐 hidden until all teammates guess
+          </div>
+          <div className="space-y-1">
+            {teammates.map((p) => {
+              const has = guesses.some((g) => g.playerId === p.id);
+              const isMe = p.id === myPlayerId;
+              return (
+                <div
+                  key={p.id}
+                  className="flex justify-between items-center text-xs py-1"
+                >
+                  <span className={isMe ? "font-bold" : ""}>
+                    {isMe ? "you" : p.name}
+                  </span>
+                  <span className="opacity-80">
+                    {has ? "🔒 locked in" : "⏳ pending"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-6 px-5 py-4 rounded-2xl bg-gradient-party w-full max-w-xs">
+          <div className="text-xs uppercase tracking-widest opacity-90 mb-2 font-bold">
+            results
+          </div>
+          <div className="space-y-2">
+            {[...teammates]
+              .map((p) => {
+                const guess = guesses.find((g) => g.playerId === p.id);
+                return { player: p, errorDeg: guess?.errorDeg ?? null };
+              })
+              .sort((a, b) => (a.errorDeg ?? 999) - (b.errorDeg ?? 999))
+              .map((row, i) => {
+                const isMe = row.player.id === myPlayerId;
+                return (
+                  <div
+                    key={row.player.id}
+                    className="flex justify-between items-center"
+                  >
+                    <span className={isMe ? "font-bold" : ""}>
+                      {i === 0 ? "🥇 " : i === 1 ? "🥈 " : "🥉 "}
+                      {isMe ? "you" : row.player.name}
+                    </span>
+                    <span className="font-display font-extrabold tabular-nums">
+                      {row.errorDeg !== null ? `${row.errorDeg.toFixed(0)}°` : "--"}
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
       )}
 
       {permError && (
