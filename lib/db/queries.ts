@@ -331,6 +331,10 @@ export async function resetEventProgress(code: string): Promise<{
       status: "active",
       winnerTeamId: null,
       finishedAt: null,
+      currentRoundIndex: null,
+      currentRoundStatus: null,
+      currentRoundStartsAt: null,
+      roundWinners: [],
     })
     .where(eq(events.id, eventRow.id))
     .returning();
@@ -374,6 +378,11 @@ export async function resetEventToLobby(code: string): Promise<{
       winnerTeamId: null,
       startedAt: null,
       finishedAt: null,
+      hostPlayerId: null,
+      currentRoundIndex: null,
+      currentRoundStatus: null,
+      currentRoundStartsAt: null,
+      roundWinners: [],
     })
     .where(eq(events.id, eventRow.id))
     .returning();
