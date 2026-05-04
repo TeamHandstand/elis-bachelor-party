@@ -1,0 +1,208 @@
+import { headers } from "next/headers";
+import Link from "next/link";
+import type { ResultsResponse } from "@/lib/api/contract";
+import type { ChallengeId } from "@/lib/types";
+import { CHALLENGES, CHALLENGE_ORDER } from "@/lib/challenges";
+
+async function fetchResults(code: string): Promise<ResultsResponse | null> {
+  const h = await headers();
+  const host = h.get("host") ?? "localhost:3000";
+  const proto = h.get("x-forwarded-proto") ?? "http";
+  const cookie = h.get("cookie") ?? "";
+  try {
+    const res = await fetch(`${proto}://${host}/api/events/${code}/results`, {
+      headers: { cookie },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as ResultsResponse;
+  } catch {
+    return null;
+  }
+}
+
+interface PageProps {
+  params: Promise<{ code: string }>;
+}
+
+export default async function ResultsPage({ params }: PageProps) {
+  const { code } = await params;
+  const data = await fetchResults(code);
+  if (!data) {
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
+        <div className="text-5xl mb-3">🤔</div>
+        <h1 className="font-display text-2xl font-bold mb-2">
+          No results yet
+        </h1>
+        <p className="opacity-60 mb-4">
+          Either the event hasn’t finished or code{" "}
+          <span className="font-mono">{code}</span> wasn’t found.
+        </p>
+        <Link href={`/host/${code}`} className="underline opacity-80">
+          Back to event dashboard
+        </Link>
+      </main>
+    );
+  }
+
+  const { event, teams, players, finalProgress } = data;
+  const enabled = CHALLENGE_ORDER.filter((id) => event.challenges[id]?.enabled);
+
+  // Build [teamId][challengeId] index
+  type Cell = (typeof finalProgress)[number];
+  const matrix: Record<string, Partial<Record<ChallengeId, Cell>>> = {};
+  for (const row of finalProgress) {
+    matrix[row.teamId] ??= {};
+    matrix[row.teamId][row.challenge] = row;
+  }
+
+  // Compute completion stats per team for ranking display
+  const ranked = teams
+    .map((team) => {
+      const tm = matrix[team.id] ?? {};
+      const completed = enabled.filter((id) => tm[id]?.completed).length;
+      const northErr = (tm.north?.value ?? 0) as number;
+      return { team, completed, northErr, tm };
+    })
+    .sort((a, b) => {
+      if (b.completed !== a.completed) return b.completed - a.completed;
+      // For tiebreak we don't have per-guess error sums in the snapshot;
+      // approximate with stored 'value' for north (which is guess count) — fine
+      // for display; the "real" tiebreaker logic lives in the live store.
+      return a.northErr - b.northErr;
+    });
+
+  const winner =
+    teams.find((t) => t.id === event.winnerTeamId) ?? ranked[0]?.team ?? null;
+
+  return (
+    <main className="min-h-screen p-6">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <div className="text-center">
+          <Link
+            href={`/host/${code}`}
+            className="text-xs opacity-60 hover:opacity-100"
+          >
+            ← Back to dashboard
+          </Link>
+          <div className="mt-4 mb-3 text-7xl">🏆</div>
+          {winner ? (
+            <div>
+              <div className="text-sm uppercase tracking-[0.3em] opacity-60">
+                Champion
+              </div>
+              <h1 className="font-display text-5xl sm:text-7xl font-extrabold mt-2 bg-gradient-party bg-clip-text text-transparent">
+                {winner.emoji} {winner.name.toUpperCase()} WINS
+              </h1>
+              <p className="mt-3 opacity-70">
+                {event.title || "Toasty Pizza"} · code {event.code}
+              </p>
+            </div>
+          ) : (
+            <h1 className="font-display text-3xl font-bold">
+              Race ended without a winner
+            </h1>
+          )}
+        </div>
+
+        <section className="bg-bg-card rounded-xl2 p-4">
+          <h2 className="font-display text-xl font-bold mb-3">
+            🏁 Final standings
+          </h2>
+          <ol className="space-y-2">
+            {ranked.map((r, idx) => {
+              const teamPlayers = players.filter((p) => p.teamId === r.team.id);
+              return (
+                <li
+                  key={r.team.id}
+                  className={`rounded-xl p-3 flex items-center gap-3 ${
+                    idx === 0
+                      ? "bg-gradient-done"
+                      : "bg-bg-deep border border-white/10"
+                  }`}
+                >
+                  <div className="text-2xl w-8 text-center">
+                    {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"}
+                  </div>
+                  <div className="text-3xl">{r.team.emoji}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-display font-extrabold truncate">
+                      {r.team.name}
+                    </div>
+                    <div className="text-xs opacity-80 truncate">
+                      {teamPlayers.map((p) => p.name).join(" · ") ||
+                        "no players"}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs opacity-70">completed</div>
+                    <div className="font-display text-2xl font-extrabold">
+                      {r.completed}/{enabled.length}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+
+        <section className="bg-bg-card rounded-xl2 p-4 overflow-x-auto">
+          <h2 className="font-display text-xl font-bold mb-3">
+            📊 Per-challenge breakdown
+          </h2>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left opacity-60">
+                <th className="px-2 py-2">Challenge</th>
+                {teams.map((t) => (
+                  <th key={t.id} className="px-2 py-2 whitespace-nowrap">
+                    {t.emoji} {t.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {enabled.map((id) => {
+                const def = CHALLENGES[id];
+                const threshold =
+                  event.challenges[id]?.threshold ?? def.defaultThreshold;
+                return (
+                  <tr key={id} className="border-t border-white/5">
+                    <td className="px-2 py-2 whitespace-nowrap">
+                      <span className="text-lg mr-1">{def.emoji}</span>
+                      <span className="font-bold">{def.label}</span>
+                    </td>
+                    {teams.map((t) => {
+                      const cell = matrix[t.id]?.[id];
+                      const value = cell?.value ?? 0;
+                      const completed = cell?.completed ?? false;
+                      return (
+                        <td
+                          key={t.id}
+                          className={`px-2 py-2 whitespace-nowrap ${
+                            completed
+                              ? "text-accent-green font-bold"
+                              : "opacity-80"
+                          }`}
+                        >
+                          {completed ? "✅ " : ""}
+                          {def.formatProgress(value, threshold)}
+                          {cell?.completedAt ? (
+                            <div className="text-[10px] opacity-50">
+                              {new Date(cell.completedAt).toLocaleTimeString()}
+                            </div>
+                          ) : null}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  );
+}
