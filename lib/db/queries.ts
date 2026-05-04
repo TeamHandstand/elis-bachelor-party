@@ -13,6 +13,7 @@ import {
 } from "./schema";
 import {
   defaultChallengeConfig,
+  enabledChallengeOrder,
 } from "@/lib/challenges";
 import type {
   ChallengeId,
@@ -619,4 +620,105 @@ export async function setHostPlayer(input: {
     .returning();
   const newRow = updated[0] ?? eventRow;
   return { event: eventRowToConfig(newRow) };
+}
+
+const COUNTDOWN_MS = 5000;
+
+/**
+ * Start the next undecided round, or redo a specific round.
+ *
+ * Advance path (no redo): if no round is currently live, picks the next round
+ * that doesn't yet have a winner in `round_winners`. If all rounds are
+ * decided, returns `{ error: 'all-decided' }`.
+ *
+ * Redo path (`redo: true, roundIndex`): wipes final_progress for that round's
+ * challenge (and all later ones), splices `round_winners` from index
+ * `roundIndex` onward, then starts that round.
+ *
+ * On success: sets currentRoundIndex/Status/StartsAt and ensures status='active'.
+ */
+export async function startRound(input: {
+  code: string;
+  redo?: boolean;
+  roundIndex?: number;
+}): Promise<
+  | {
+      event: EventConfig;
+      challenge: ChallengeId;
+      startsAt: number;
+      progressReset: boolean;
+    }
+  | { error: "not-found" | "all-decided" | "round-live" | "invalid-index" }
+> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  const challengesCfg = eventRow.challenges as EventConfig["challenges"];
+  const order = enabledChallengeOrder(challengesCfg);
+  const winners = (eventRow.roundWinners as RoundWinnerEntry[]) ?? [];
+
+  let targetIndex: number;
+  let progressReset = false;
+
+  if (input.redo) {
+    if (
+      typeof input.roundIndex !== "number" ||
+      input.roundIndex < 0 ||
+      input.roundIndex >= order.length
+    ) {
+      return { error: "invalid-index" };
+    }
+    targetIndex = input.roundIndex;
+
+    const trimmedWinners = winners.slice(0, targetIndex);
+    const challengesToWipe = order.slice(targetIndex);
+    if (challengesToWipe.length > 0) {
+      await db.execute(sql`
+        DELETE FROM final_progress
+        WHERE event_id = ${eventRow.id}
+        AND challenge = ANY(${challengesToWipe})
+      `);
+    }
+
+    await db
+      .update(events)
+      .set({ roundWinners: trimmedWinners })
+      .where(eq(events.id, eventRow.id));
+
+    progressReset = true;
+  } else {
+    if (eventRow.currentRoundStatus === "live") {
+      return { error: "round-live" };
+    }
+    targetIndex = winners.length;
+    if (targetIndex >= order.length) return { error: "all-decided" };
+  }
+
+  const challenge = order[targetIndex];
+  const startsAt = new Date(Date.now() + COUNTDOWN_MS);
+
+  const updated = await db
+    .update(events)
+    .set({
+      status: "active",
+      startedAt: eventRow.startedAt ?? new Date(),
+      currentRoundIndex: targetIndex,
+      currentRoundStatus: "live",
+      currentRoundStartsAt: startsAt,
+    })
+    .where(eq(events.id, eventRow.id))
+    .returning();
+  const newRow = updated[0] ?? eventRow;
+
+  return {
+    event: eventRowToConfig(newRow),
+    challenge,
+    startsAt: startsAt.getTime(),
+    progressReset,
+  };
 }
