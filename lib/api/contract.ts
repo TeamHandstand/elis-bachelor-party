@@ -160,3 +160,44 @@ export interface ResultsResponse {
     completedAt: string | null;
   }>;
 }
+
+// ---------- PATCH /api/events/:code/host-player ----------
+// Host-cookie protected. Sets or clears the designated host player.
+export interface SetHostPlayerRequest {
+  playerId: string | null;
+}
+export interface SetHostPlayerResponse {
+  event: EventConfig;
+}
+
+// ---------- POST /api/events/:code/round/start ----------
+// Auth: host-cookie OR { playerId } in body matching events.host_player_id.
+// Advances to next undecided round, or redoes a specific round.
+export interface StartRoundRequest {
+  playerId?: string; // for host-player auth path
+  redo?: boolean;
+  roundIndex?: number; // required if redo is true
+}
+export interface StartRoundResponse {
+  event: EventConfig;
+  challenge: ChallengeId;
+  startsAt: number;
+}
+
+// ---------- POST /api/events/:code/round/end ----------
+// Auth modes:
+//  - mode='auto': any client; server validates the team has completed
+//    the current challenge in final_progress.
+//  - mode='host': requires host-cookie OR matching playerId.
+export interface EndRoundRequest {
+  mode: "auto" | "host";
+  playerId?: string; // for host-player auth path
+  teamId?: string; // required when mode='auto'; optional when 'host'
+}
+export interface EndRoundResponse {
+  event: EventConfig;
+  winnerTeamId: string;
+  decidedAt: number;
+  eventFinished: boolean;
+  alreadyDecided: boolean;
+}
