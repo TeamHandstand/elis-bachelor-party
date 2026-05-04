@@ -1,23 +1,25 @@
 "use client";
 
 import { useToastyStore } from "@/lib/store";
-import { useStandings } from "@/lib/store/selectors";
+import { useRoundStandings } from "@/lib/store/selectors";
+import { enabledChallengeOrder } from "@/lib/challenges";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
 export function StandingsCard() {
-  const standings = useStandings();
+  const standings = useRoundStandings();
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const event = useToastyStore((s) => s.event);
 
   if (!event || standings.length === 0) return null;
 
-  const totalEnabled = Object.values(event.challenges).filter((c) => c.enabled).length;
+  const totalRounds = enabledChallengeOrder(event.challenges).length;
+  const decidedCount = event.roundWinners.length;
 
   return (
     <div className="rounded-2xl bg-bg-card p-3 mt-3">
       <div className="text-[10px] uppercase tracking-widest opacity-60 mb-1 font-bold">
-        Standings
+        Standings · {decidedCount}/{totalRounds} rounds
       </div>
       {standings.map((row, i) => {
         const isMe = row.team.id === myTeamId;
@@ -33,7 +35,7 @@ export function StandingsCard() {
               {isMe ? " (us)" : ""}
             </span>
             <span className="font-bold tabular-nums">
-              {row.completedCount}/{totalEnabled}
+              {row.wins} {row.wins === 1 ? "win" : "wins"}
             </span>
           </div>
         );

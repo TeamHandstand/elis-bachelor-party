@@ -105,3 +105,42 @@ export async function getResults(code: string): Promise<ResultsResponse> {
 }
 
 export { FetchError };
+
+import type {
+  EndRoundRequest,
+  EndRoundResponse,
+  SetHostPlayerRequest,
+  SetHostPlayerResponse,
+  StartRoundRequest,
+  StartRoundResponse,
+} from "@/lib/api/contract";
+
+export async function setHostPlayer(
+  code: string,
+  body: SetHostPlayerRequest,
+): Promise<SetHostPlayerResponse> {
+  return http<SetHostPlayerResponse>(`/api/events/${code}/host-player`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export async function startRound(
+  code: string,
+  body: StartRoundRequest = {},
+): Promise<StartRoundResponse> {
+  return http<StartRoundResponse>(`/api/events/${code}/round/start`, {
+    method: "POST",
+    body,
+  });
+}
+
+export async function endRound(
+  code: string,
+  body: EndRoundRequest,
+): Promise<EndRoundResponse> {
+  return http<EndRoundResponse>(`/api/events/${code}/round/end`, {
+    method: "POST",
+    body,
+  });
+}

@@ -1,7 +1,7 @@
 "use client";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
-import { useStandings } from "@/lib/store/selectors";
+import { useRoundStandings } from "@/lib/store/selectors";
 import { CHALLENGES, CHALLENGE_ORDER } from "@/lib/challenges";
 import type { ChallengeId, Player, Team, TeamProgress } from "@/lib/types";
 
@@ -17,7 +17,7 @@ export default function HostMonitor({ code }: Props) {
   const teams = useToastyStore((s) => s.teams);
   const players = useToastyStore((s) => s.players);
   const progress = useToastyStore((s) => s.progress);
-  const standings = useStandings();
+  const standings = useRoundStandings();
 
   if (!event) {
     return (
@@ -67,7 +67,8 @@ export default function HostMonitor({ code }: Props) {
               progress={tp}
               enabled={enabled}
               thresholds={event.challenges}
-              completedCount={row.completedCount}
+              wins={row.wins}
+              totalRounds={enabled.length}
               place={place}
             />
           );
@@ -83,7 +84,8 @@ function TeamMonitorCard({
   progress,
   enabled,
   thresholds,
-  completedCount,
+  wins,
+  totalRounds,
   place,
 }: {
   team: Team;
@@ -91,7 +93,8 @@ function TeamMonitorCard({
   progress: TeamProgress | undefined;
   enabled: ChallengeId[];
   thresholds: Record<ChallengeId, { enabled: boolean; threshold: number }>;
-  completedCount: number;
+  wins: number;
+  totalRounds: number;
   place: number;
 }) {
   return (
@@ -111,7 +114,10 @@ function TeamMonitorCard({
             {place === 1 ? "🥇 1st" : place === 2 ? "🥈 2nd" : "🥉 3rd"}
           </div>
           <div className="font-display text-2xl font-extrabold">
-            {completedCount}/{enabled.length}
+            {wins} <span className="text-xs opacity-60">/ {totalRounds}</span>
+          </div>
+          <div className="text-[10px] opacity-50 uppercase tracking-wide">
+            round wins
           </div>
         </div>
       </div>

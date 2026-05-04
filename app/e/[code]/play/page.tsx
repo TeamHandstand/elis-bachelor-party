@@ -1,18 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useProgressFlush } from "@/lib/store/flush";
 import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
-import { CHALLENGE_ORDER, CHALLENGES } from "@/lib/challenges";
-import { TeamHeader } from "@/components/dashboard/TeamHeader";
-import { TeammateOrbit } from "@/components/dashboard/TeammateOrbit";
-import { ChallengeTile } from "@/components/dashboard/ChallengeTile";
-import { StandingsCard } from "@/components/dashboard/StandingsCard";
+import { JourneyView } from "@/components/play/JourneyView";
 import { PermissionWizard } from "@/components/permissions/PermissionWizard";
-import type { FinishEventRequest } from "@/lib/api/contract";
 
 export default function PlayPage() {
   const router = useRouter();
@@ -22,7 +17,6 @@ export default function PlayPage() {
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [showPerms, setShowPerms] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const finishedRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined" || !code) return;
@@ -61,12 +55,8 @@ export default function PlayPage() {
   }, [hydrated]);
 
   const event = useToastyStore((s) => s.event);
-  const myTeamId = useToastyStore((s) => s.myTeamId);
-  const myProgress = useToastyStore((s) => s.getMyTeamProgress());
-  const isFinished = useToastyStore((s) => s.isTeamFinished);
-  const progressMap = useToastyStore((s) => s.progress);
 
-  // Redirect on event status changes.
+  // Lobby/finished routing.
   useEffect(() => {
     if (event?.status === "lobby") {
       router.replace(`/e/${code}/lobby`);
@@ -74,44 +64,6 @@ export default function PlayPage() {
       router.replace(`/e/${code}/done`);
     }
   }, [event?.status, code, router]);
-
-  // Detect team finish and POST /finish, then redirect.
-  useEffect(() => {
-    if (!event || !myTeamId || finishedRef.current) return;
-    if (!isFinished(myTeamId)) return;
-    finishedRef.current = true;
-
-    (async () => {
-      try {
-        const finalProgress: FinishEventRequest["finalProgress"] = [];
-        for (const teamId of Object.keys(progressMap)) {
-          const tp = progressMap[teamId];
-          for (const id of CHALLENGE_ORDER) {
-            const cur = tp[id];
-            finalProgress.push({
-              teamId,
-              challenge: id,
-              value: cur?.value ?? 0,
-              completed: !!cur?.completed,
-              completedAt: cur?.completedAt ?? null,
-            });
-          }
-        }
-        await fetch(`/api/events/${code}/finish`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            teamId: myTeamId,
-            finalProgress,
-          } as FinishEventRequest),
-        });
-      } catch {
-        // ignore — server is source of truth, retries will surface event-state
-      } finally {
-        router.replace(`/e/${code}/done`);
-      }
-    })();
-  }, [event, myTeamId, isFinished, progressMap, code, router]);
 
   if (!hydrated || !event) {
     return (
@@ -125,10 +77,6 @@ export default function PlayPage() {
       </main>
     );
   }
-
-  const enabledChallenges = CHALLENGE_ORDER.filter(
-    (id) => event.challenges[id]?.enabled,
-  );
 
   return (
     <>
@@ -144,24 +92,7 @@ export default function PlayPage() {
           }}
         />
       )}
-      <main className="min-h-screen flex flex-col p-3 safe-top safe-bottom">
-        <TeamHeader />
-        <TeammateOrbit />
-        <div className="grid grid-cols-2 gap-2">
-          {enabledChallenges.map((id) => (
-            <ChallengeTile
-              key={id}
-              code={code}
-              challenge={id}
-              progress={myProgress?.[id] ?? null}
-              threshold={
-                event.challenges[id]?.threshold ?? CHALLENGES[id].defaultThreshold
-              }
-            />
-          ))}
-        </div>
-        <StandingsCard />
-      </main>
+      <JourneyView code={code} myPlayerId={myPlayerId} />
     </>
   );
 }

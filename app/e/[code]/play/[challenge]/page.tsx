@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useProgressFlush } from "@/lib/store/flush";
 import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
-import { CHALLENGES } from "@/lib/challenges";
+import { CHALLENGES, enabledChallengeOrder } from "@/lib/challenges";
+import { useStandings } from "@/lib/store/selectors";
+import { endRound } from "@/components/host/_fetch";
 import type { ChallengeId } from "@/lib/types";
+import { CountdownOverlay } from "@/components/play/CountdownOverlay";
 import { DistanceView } from "@/components/challenge/DistanceView";
 import { StepsView } from "@/components/challenge/StepsView";
 import { TapsView } from "@/components/challenge/TapsView";
@@ -35,6 +38,7 @@ export default function ChallengePage() {
 
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const autoEndedRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined" || !code) return;
@@ -50,7 +54,6 @@ export default function ChallengePage() {
   useEventBootstrap(code, myPlayerId);
   useProgressFlush(code);
 
-  // Wake-lock for the duration of the challenge view.
   useEffect(() => {
     if (!hydrated) return;
     let lock: any;
@@ -71,16 +74,73 @@ export default function ChallengePage() {
   }, [hydrated]);
 
   const event = useToastyStore((s) => s.event);
+  const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
+  const standings = useStandings();
+  const progressMap = useToastyStore((s) => s.progress);
 
   const isValid = useMemo(() => VALID_IDS.includes(challenge), [challenge]);
   const def = isValid ? CHALLENGES[challenge] : null;
 
-  // Auto-bounce to dashboard if event reverts/finishes.
+  // Lobby/finished bounce.
   useEffect(() => {
     if (event?.status === "lobby") router.replace(`/e/${code}/lobby`);
     if (event?.status === "finished") router.replace(`/e/${code}/done`);
   }, [event?.status, code, router]);
+
+  // If this challenge isn't the current round, bounce back to journey.
+  useEffect(() => {
+    if (!event) return;
+    if (event.currentRoundIndex === null) {
+      router.replace(`/e/${code}/play`);
+      return;
+    }
+    const order = enabledChallengeOrder(event.challenges);
+    const currentChallenge = order[event.currentRoundIndex];
+    if (currentChallenge !== challenge) {
+      router.replace(`/e/${code}/play`);
+    }
+  }, [
+    event?.currentRoundIndex,
+    event?.currentRoundStatus,
+    event,
+    challenge,
+    router,
+    code,
+  ]);
+
+  // Auto-redirect to journey when the round is decided.
+  useEffect(() => {
+    if (!event) return;
+    if (event.currentRoundStatus === "decided") {
+      router.replace(`/e/${code}/play`);
+    }
+  }, [event?.currentRoundStatus, router, code, event]);
+
+  // Auto-end detection: if my team has just completed the threshold for
+  // this challenge, POST /round/end (mode=auto). Server validates and
+  // first-write-wins.
+  useEffect(() => {
+    if (!event || !myTeamId || autoEndedRef.current) return;
+    if (event.currentRoundStatus !== "live") return;
+    const cur = myProgress?.[challenge];
+    if (!cur?.completed) return;
+    autoEndedRef.current = true;
+    (async () => {
+      try {
+        await endRound(code, { mode: "auto", teamId: myTeamId });
+      } catch (err) {
+        console.error("[challenge] auto endRound failed", err);
+      }
+    })();
+  }, [
+    event?.currentRoundStatus,
+    myProgress,
+    challenge,
+    myTeamId,
+    code,
+    event,
+  ]);
 
   if (!hydrated || !myPlayerId) {
     return (
@@ -108,6 +168,14 @@ export default function ChallengePage() {
   const myCur = myProgress?.[challenge];
   const threshold =
     event?.challenges[challenge]?.threshold ?? def.defaultThreshold;
+  const totalRounds = event ? enabledChallengeOrder(event.challenges).length : 0;
+  const ordinal = (event?.currentRoundIndex ?? 0) + 1;
+
+  const showCountdown =
+    !!event &&
+    event.currentRoundStatus === "live" &&
+    event.currentRoundStartsAt !== null &&
+    Date.now() < event.currentRoundStartsAt;
 
   let view: React.ReactNode = null;
   switch (challenge) {
@@ -139,25 +207,59 @@ export default function ChallengePage() {
     : def.formatProgress(0, threshold);
 
   return (
-    <main className="min-h-screen flex flex-col">
-      <header className="flex items-center gap-3 p-3 bg-bg-deep">
-        <Link
-          href={`/e/${code}/play`}
-          className="px-3 py-2 rounded-xl bg-bg-card font-bold text-sm no-select"
-        >
-          ←
-        </Link>
-        <div className="flex-1 min-w-0">
-          <div className="text-xs uppercase tracking-widest opacity-60 truncate">
-            {def.label}
+    <>
+      {showCountdown && event.currentRoundStartsAt !== null && (
+        <CountdownOverlay
+          startsAt={event.currentRoundStartsAt}
+          challenge={challenge}
+          onDone={() => {
+            /* fall through to challenge view */
+          }}
+        />
+      )}
+      <main className="min-h-screen flex flex-col">
+        <header className="flex items-center gap-3 p-3 bg-bg-deep">
+          <Link
+            href={`/e/${code}/play`}
+            className="px-3 py-2 rounded-xl bg-bg-card font-bold text-sm no-select"
+          >
+            ←
+          </Link>
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] uppercase tracking-widest opacity-60 truncate">
+              Round {ordinal} / {totalRounds} · {def.label}
+            </div>
+            <div className="font-extrabold tabular-nums truncate">
+              {progressLabel}
+            </div>
           </div>
-          <div className="font-extrabold tabular-nums truncate">
-            {progressLabel}
-          </div>
+          <div className="text-3xl">{def.emoji}</div>
+        </header>
+        {/* Live mini-leaderboard */}
+        <div className="px-3 py-2 flex flex-wrap gap-2 bg-bg-deep/60 border-b border-white/5">
+          {standings.map((row) => {
+            const isMine = row.team.id === myTeamId;
+            const tp = progressMap[row.team.id];
+            const cur = tp?.[challenge];
+            const valueStr = cur
+              ? def.formatProgress(cur.value, threshold)
+              : def.formatProgress(0, threshold);
+            return (
+              <div
+                key={row.team.id}
+                className={`px-2 py-1 rounded-lg text-[11px] tabular-nums ${
+                  isMine
+                    ? "bg-accent-orange/20 text-accent-orange font-extrabold"
+                    : "bg-bg-card opacity-80"
+                }`}
+              >
+                {row.team.emoji} {valueStr}
+              </div>
+            );
+          })}
         </div>
-        <div className="text-3xl">{def.emoji}</div>
-      </header>
-      {view}
-    </main>
+        {view}
+      </main>
+    </>
   );
 }

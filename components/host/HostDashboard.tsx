@@ -5,6 +5,7 @@ import type { GetEventResponse } from "@/lib/api/contract";
 import type { EventConfig, Player, Team } from "@/lib/types";
 import EventConfigPanel from "./EventConfigPanel";
 import HostMonitor from "./HostMonitor";
+import HostPlayerPicker from "./HostPlayerPicker";
 import QrCard from "./QrCard";
 import StartButton from "./StartButton";
 import ResetButtons from "./ResetButtons";
@@ -64,12 +65,19 @@ export default function HostDashboard({ initial }: Props) {
           ) : null}
 
           {tab === "teams" ? (
-            <TeamBuilder
-              event={event}
-              teams={teams}
-              players={players}
-              onChange={applyChange}
-            />
+            <div className="space-y-4">
+              <HostPlayerPicker
+                event={event}
+                players={players}
+                onChange={(e) => setEvent(e)}
+              />
+              <TeamBuilder
+                event={event}
+                teams={teams}
+                players={players}
+                onChange={applyChange}
+              />
+            </div>
           ) : null}
 
           {tab === "monitor" ? <HostMonitor code={event.code} /> : null}
@@ -114,6 +122,21 @@ function StickyHeader({
             <span>{players.length} players</span>
             <span>·</span>
             <span>{teams.length} teams</span>
+            <span>·</span>
+            <span>
+              {event.hostPlayerId ? (
+                <>
+                  host:{" "}
+                  <span className="text-accent-orange font-bold">
+                    👑{" "}
+                    {players.find((p) => p.id === event.hostPlayerId)?.name ??
+                      "?"}
+                  </span>
+                </>
+              ) : (
+                <span className="opacity-50">no host set</span>
+              )}
+            </span>
             <span>·</span>
             <span>
               status:{" "}

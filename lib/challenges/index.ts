@@ -55,11 +55,11 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
     id: "spin",
     label: "Spin Cycle",
     emoji: "🌀",
-    defaultThreshold: 30, // 10 per player × 3 players
+    defaultThreshold: 100,
     unit: "rotations",
-    aggregation: "per-player",
-    description: "Each teammate spins their body 10 full rotations while holding two on-screen buttons.",
-    formatProgress: (v, t) => `${Math.floor(v)} / ${t} spins`,
+    aggregation: "team-total",
+    description: "Spin in place until your team racks up 100 rotations. Must hold both on-screen buttons.",
+    formatProgress: (v, t) => `${Math.floor(v).toLocaleString()} / ${t.toLocaleString()} spins`,
   },
   north: {
     id: "north",
@@ -89,4 +89,14 @@ export function defaultChallengeConfig(): EventConfig["challenges"] {
     out[id] = { enabled: true, threshold: CHALLENGES[id].defaultThreshold };
   }
   return out as EventConfig["challenges"];
+}
+
+/**
+ * Filter CHALLENGE_ORDER down to only the challenges enabled in this event.
+ * Used to drive the heptathlon: round N maps to enabledChallengeOrder(event)[N].
+ */
+export function enabledChallengeOrder(
+  challenges: EventConfig["challenges"],
+): ChallengeId[] {
+  return CHALLENGE_ORDER.filter((id) => challenges[id]?.enabled);
 }

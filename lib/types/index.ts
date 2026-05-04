@@ -91,6 +91,29 @@ export interface ProgressResetMsg {
   ts: number;
 }
 
+export interface RoundStartMsg {
+  kind: "round-start";
+  roundIndex: number;
+  challenge: ChallengeId;
+  startsAt: number; // ms epoch — when countdown ends
+  ts: number;
+}
+
+export interface RoundEndMsg {
+  kind: "round-end";
+  roundIndex: number;
+  challenge: ChallengeId;
+  winnerTeamId: string;
+  decidedAt: number;
+  ts: number;
+}
+
+export interface HostChangedMsg {
+  kind: "host-changed";
+  hostPlayerId: string | null;
+  ts: number;
+}
+
 export type ProgressMsg =
   | ProgressDeltaMsg
   | LiveLevelMsg
@@ -99,9 +122,20 @@ export type ProgressMsg =
   | EventStateMsg
   | PlayerJoinedMsg
   | TeamAssignmentMsg
-  | ProgressResetMsg;
+  | ProgressResetMsg
+  | RoundStartMsg
+  | RoundEndMsg
+  | HostChangedMsg;
 
 // ----- Domain entities (mirror DB rows; serializable for client use) -----
+
+export interface RoundWinnerEntry {
+  challenge: ChallengeId;
+  teamId: string;
+  decidedAt: number;
+}
+
+export type RoundStatus = "live" | "decided";
 
 export interface EventConfig {
   id: string;
@@ -114,6 +148,12 @@ export interface EventConfig {
   startedAt: string | null;
   finishedAt: string | null;
   winnerTeamId: string | null;
+  // Heptathlon round state. All null in lobby.
+  hostPlayerId: string | null;
+  currentRoundIndex: number | null;
+  currentRoundStatus: RoundStatus | null;
+  currentRoundStartsAt: number | null; // ms epoch
+  roundWinners: RoundWinnerEntry[];
 }
 
 export interface Team {

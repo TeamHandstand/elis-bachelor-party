@@ -13,12 +13,15 @@ import {
 } from "./schema";
 import {
   defaultChallengeConfig,
+  enabledChallengeOrder,
 } from "@/lib/challenges";
 import type {
   ChallengeId,
   EventConfig,
   EventStatus,
   Player,
+  RoundStatus,
+  RoundWinnerEntry,
   Team,
 } from "@/lib/types";
 import { generateEventCode } from "@/lib/utils/code";
@@ -45,6 +48,13 @@ export function eventRowToConfig(row: EventRow): EventConfig {
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
     winnerTeamId: row.winnerTeamId,
+    hostPlayerId: row.hostPlayerId,
+    currentRoundIndex: row.currentRoundIndex,
+    currentRoundStatus: (row.currentRoundStatus as RoundStatus | null) ?? null,
+    currentRoundStartsAt: row.currentRoundStartsAt
+      ? row.currentRoundStartsAt.getTime()
+      : null,
+    roundWinners: (row.roundWinners as RoundWinnerEntry[]) ?? [],
   };
 }
 
@@ -321,6 +331,10 @@ export async function resetEventProgress(code: string): Promise<{
       status: "active",
       winnerTeamId: null,
       finishedAt: null,
+      currentRoundIndex: null,
+      currentRoundStatus: null,
+      currentRoundStartsAt: null,
+      roundWinners: [],
     })
     .where(eq(events.id, eventRow.id))
     .returning();
@@ -364,6 +378,11 @@ export async function resetEventToLobby(code: string): Promise<{
       winnerTeamId: null,
       startedAt: null,
       finishedAt: null,
+      hostPlayerId: null,
+      currentRoundIndex: null,
+      currentRoundStatus: null,
+      currentRoundStartsAt: null,
+      roundWinners: [],
     })
     .where(eq(events.id, eventRow.id))
     .returning();
@@ -572,5 +591,357 @@ export async function getResults(code: string): Promise<{
       completed: r.completed,
       completedAt: r.completedAt ? r.completedAt.toISOString() : null,
     })),
+  };
+}
+
+/**
+ * Set or clear the host player for an event. Returns the updated event config,
+ * or { error: 'not-found' } if the event doesn't exist, or { error: 'invalid-player' }
+ * if a playerId was supplied but doesn't belong to this event.
+ */
+export async function setHostPlayer(input: {
+  code: string;
+  playerId: string | null;
+}): Promise<{ event: EventConfig } | { error: "not-found" | "invalid-player" }> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  if (input.playerId !== null) {
+    const matching = await db
+      .select({ id: players.id })
+      .from(players)
+      .where(
+        and(eq(players.id, input.playerId), eq(players.eventId, eventRow.id)),
+      )
+      .limit(1);
+    if (!matching[0]) return { error: "invalid-player" };
+  }
+
+  const updated = await db
+    .update(events)
+    .set({ hostPlayerId: input.playerId })
+    .where(eq(events.id, eventRow.id))
+    .returning();
+  const newRow = updated[0] ?? eventRow;
+  return { event: eventRowToConfig(newRow) };
+}
+
+const COUNTDOWN_MS = 5000;
+
+/**
+ * Start the next undecided round, or redo a specific round.
+ *
+ * Advance path (no redo): if no round is currently live, picks the next round
+ * that doesn't yet have a winner in `round_winners`. If all rounds are
+ * decided, returns `{ error: 'all-decided' }`.
+ *
+ * Redo path (`redo: true, roundIndex`): wipes final_progress for that round's
+ * challenge (and all later ones), splices `round_winners` from index
+ * `roundIndex` onward, then starts that round.
+ *
+ * On success: sets currentRoundIndex/Status/StartsAt and ensures status='active'.
+ */
+export async function startRound(input: {
+  code: string;
+  redo?: boolean;
+  roundIndex?: number;
+}): Promise<
+  | {
+      event: EventConfig;
+      challenge: ChallengeId;
+      startsAt: number;
+      progressReset: boolean;
+    }
+  | { error: "not-found" | "all-decided" | "round-live" | "invalid-index" }
+> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  const challengesCfg = eventRow.challenges as EventConfig["challenges"];
+  const order = enabledChallengeOrder(challengesCfg);
+  const winners = (eventRow.roundWinners as RoundWinnerEntry[]) ?? [];
+
+  let targetIndex: number;
+  let progressReset = false;
+
+  if (input.redo) {
+    if (
+      typeof input.roundIndex !== "number" ||
+      input.roundIndex < 0 ||
+      input.roundIndex >= order.length
+    ) {
+      return { error: "invalid-index" };
+    }
+    targetIndex = input.roundIndex;
+
+    const trimmedWinners = winners.slice(0, targetIndex);
+    const challengesToWipe = order.slice(targetIndex);
+    if (challengesToWipe.length > 0) {
+      await db.execute(sql`
+        DELETE FROM final_progress
+        WHERE event_id = ${eventRow.id}
+        AND challenge = ANY(${challengesToWipe})
+      `);
+    }
+
+    await db
+      .update(events)
+      .set({ roundWinners: trimmedWinners })
+      .where(eq(events.id, eventRow.id));
+
+    progressReset = true;
+  } else {
+    if (eventRow.currentRoundStatus === "live") {
+      return { error: "round-live" };
+    }
+    targetIndex = winners.length;
+    if (targetIndex >= order.length) return { error: "all-decided" };
+  }
+
+  const challenge = order[targetIndex];
+  const startsAt = new Date(Date.now() + COUNTDOWN_MS);
+
+  const updated = await db
+    .update(events)
+    .set({
+      status: "active",
+      startedAt: eventRow.startedAt ?? new Date(),
+      currentRoundIndex: targetIndex,
+      currentRoundStatus: "live",
+      currentRoundStartsAt: startsAt,
+    })
+    .where(eq(events.id, eventRow.id))
+    .returning();
+  const newRow = updated[0] ?? eventRow;
+
+  return {
+    event: eventRowToConfig(newRow),
+    challenge,
+    startsAt: startsAt.getTime(),
+    progressReset,
+  };
+}
+
+/**
+ * Atomically end the currently-live round and append a winner.
+ *
+ * `mode === 'auto'`: caller claims a team has just completed the threshold.
+ * Server validates by reading `final_progress` for the current challenge —
+ * only honored if that team's row is `completed=true`.
+ *
+ * `mode === 'host'`: no auto-validation. If `requestedTeamId` is omitted,
+ * server picks per the rules in the spec.
+ *
+ * First-write-wins via predicate update: only flips status from 'live' to
+ * 'decided' when index is unchanged. If this was the last enabled round,
+ * also sets event status to 'finished' and computes overall winnerTeamId.
+ */
+export async function endRound(input: {
+  code: string;
+  mode: "auto" | "host";
+  requestedTeamId?: string;
+}): Promise<
+  | {
+      event: EventConfig;
+      challenge: ChallengeId;
+      winnerTeamId: string;
+      decidedAt: number;
+      eventFinished: boolean;
+      alreadyDecided: boolean;
+    }
+  | { error: "not-found" | "no-live-round" | "not-completed" | "no-teams" }
+> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+  if (
+    eventRow.currentRoundStatus !== "live" ||
+    eventRow.currentRoundIndex === null
+  ) {
+    return { error: "no-live-round" };
+  }
+
+  const challengesCfg = eventRow.challenges as EventConfig["challenges"];
+  const order = enabledChallengeOrder(challengesCfg);
+  const idx = eventRow.currentRoundIndex;
+  if (idx < 0 || idx >= order.length) return { error: "no-live-round" };
+  const challenge = order[idx];
+
+  const fpRows = await db
+    .select()
+    .from(finalProgress)
+    .where(eq(finalProgress.eventId, eventRow.id));
+
+  let winnerTeamId: string | null = null;
+
+  if (input.mode === "auto") {
+    if (!input.requestedTeamId) return { error: "not-completed" };
+    const claim = fpRows.find(
+      (r) =>
+        r.teamId === input.requestedTeamId &&
+        r.challenge === challenge &&
+        r.completed,
+    );
+    if (!claim) return { error: "not-completed" };
+    winnerTeamId = input.requestedTeamId;
+  } else {
+    if (input.requestedTeamId) {
+      winnerTeamId = input.requestedTeamId;
+    } else {
+      const teamRows = await db
+        .select()
+        .from(teams)
+        .where(eq(teams.eventId, eventRow.id));
+      if (teamRows.length === 0) return { error: "no-teams" };
+
+      if (challenge === "north") {
+        // No per-guess data on server; fall back to first completed row,
+        // else first team.
+        const completed = fpRows.filter(
+          (r) => r.challenge === challenge && r.completed,
+        );
+        winnerTeamId = completed[0]?.teamId ?? teamRows[0].id;
+      } else if (challenge === "scream" || challenge === "shake") {
+        // First completed wins; fallback to first team.
+        const completed = fpRows.filter(
+          (r) => r.challenge === challenge && r.completed,
+        );
+        completed.sort((a, b) => {
+          const at = a.completedAt?.getTime() ?? Infinity;
+          const bt = b.completedAt?.getTime() ?? Infinity;
+          return at - bt;
+        });
+        winnerTeamId = completed[0]?.teamId ?? teamRows[0].id;
+      } else {
+        // Accumulators (distance/steps/taps/spin): highest value wins.
+        const challengeRows = fpRows.filter((r) => r.challenge === challenge);
+        let best: { teamId: string; value: number } | null = null;
+        for (const r of challengeRows) {
+          const v = Number(r.value);
+          if (!best || v > best.value) best = { teamId: r.teamId, value: v };
+        }
+        winnerTeamId = best?.teamId ?? teamRows[0].id;
+      }
+    }
+  }
+
+  if (!winnerTeamId) return { error: "no-teams" };
+
+  const decidedAt = Date.now();
+  const newWinnerEntry: RoundWinnerEntry = {
+    challenge,
+    teamId: winnerTeamId,
+    decidedAt,
+  };
+  const existingWinners = (eventRow.roundWinners as RoundWinnerEntry[]) ?? [];
+  const trimmed = existingWinners.slice(0, idx);
+  const nextWinners = [...trimmed, newWinnerEntry];
+
+  const isLastRound = idx + 1 >= order.length;
+
+  let overallWinnerTeamId: string | null = null;
+  if (isLastRound) {
+    const counts = new Map<string, number>();
+    for (const w of nextWinners) {
+      counts.set(w.teamId, (counts.get(w.teamId) ?? 0) + 1);
+    }
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    if (
+      sorted.length === 1 ||
+      (sorted.length > 1 && sorted[0][1] > sorted[1][1])
+    ) {
+      overallWinnerTeamId = sorted[0][0];
+    } else {
+      // Tied. Prefer team that won north.
+      const tiedCount = sorted[0][1];
+      const tiedTeamIds = new Set(
+        sorted.filter(([, c]) => c === tiedCount).map(([t]) => t),
+      );
+      const northWinner = nextWinners.find(
+        (w) => w.challenge === "north" && tiedTeamIds.has(w.teamId),
+      );
+      if (northWinner) {
+        overallWinnerTeamId = northWinner.teamId;
+      } else {
+        // Fallback: earliest cumulative decidedAt.
+        const teamFirstWin = new Map<string, number>();
+        for (const w of nextWinners) {
+          if (!tiedTeamIds.has(w.teamId)) continue;
+          const cur = teamFirstWin.get(w.teamId);
+          if (cur === undefined || w.decidedAt < cur) {
+            teamFirstWin.set(w.teamId, w.decidedAt);
+          }
+        }
+        const earliest = [...teamFirstWin.entries()].sort(
+          (a, b) => a[1] - b[1],
+        );
+        overallWinnerTeamId = earliest[0]?.[0] ?? sorted[0][0];
+      }
+    }
+  }
+
+  const claimed = await db
+    .update(events)
+    .set({
+      currentRoundStatus: "decided",
+      roundWinners: nextWinners,
+      ...(isLastRound
+        ? {
+            status: "finished",
+            finishedAt: new Date(),
+            winnerTeamId: overallWinnerTeamId,
+          }
+        : {}),
+    })
+    .where(
+      and(
+        eq(events.id, eventRow.id),
+        eq(events.currentRoundStatus, "live"),
+        eq(events.currentRoundIndex, idx),
+      ),
+    )
+    .returning();
+
+  if (!claimed[0]) {
+    // Lost the race. Re-fetch to report state.
+    const refetch = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, eventRow.id))
+      .limit(1);
+    const finalRow = refetch[0] ?? eventRow;
+    const winners = (finalRow.roundWinners as RoundWinnerEntry[]) ?? [];
+    const existing = winners[idx];
+    return {
+      event: eventRowToConfig(finalRow),
+      challenge,
+      winnerTeamId: existing?.teamId ?? winnerTeamId,
+      decidedAt: existing?.decidedAt ?? decidedAt,
+      eventFinished: finalRow.status === "finished",
+      alreadyDecided: true,
+    };
+  }
+
+  return {
+    event: eventRowToConfig(claimed[0]),
+    challenge,
+    winnerTeamId,
+    decidedAt,
+    eventFinished: isLastRound,
+    alreadyDecided: false,
   };
 }
