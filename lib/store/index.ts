@@ -216,6 +216,72 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         get().clearAllProgress();
         break;
       }
+
+      case "round-start": {
+        const ev = state.event;
+        if (!ev) return;
+        // Wipe in-memory progress for this challenge across all teams so the
+        // round starts clean. Past round winners stay in event.roundWinners.
+        const newProgress: Record<string, TeamProgress> = {};
+        for (const tid of Object.keys(state.progress)) {
+          const tp = state.progress[tid];
+          newProgress[tid] = {
+            ...tp,
+            [msg.challenge]: {
+              value: 0,
+              completed: false,
+              completedAt: null,
+              perPlayer: {},
+              guesses: [],
+            },
+          };
+        }
+        set({
+          progress: newProgress,
+          liveLevels: {},
+          event: {
+            ...ev,
+            currentRoundIndex: msg.roundIndex,
+            currentRoundStatus: "live",
+            currentRoundStartsAt: msg.startsAt,
+          },
+        });
+        break;
+      }
+
+      case "round-end": {
+        const ev = state.event;
+        if (!ev) return;
+        const trimmed = ev.roundWinners.slice(0, msg.roundIndex);
+        const nextWinners = [
+          ...trimmed,
+          {
+            challenge: msg.challenge,
+            teamId: msg.winnerTeamId,
+            decidedAt: msg.decidedAt,
+          },
+        ];
+        set({
+          event: {
+            ...ev,
+            currentRoundStatus: "decided",
+            roundWinners: nextWinners,
+          },
+        });
+        break;
+      }
+
+      case "host-changed": {
+        const ev = state.event;
+        if (!ev) return;
+        set({
+          event: {
+            ...ev,
+            hostPlayerId: msg.hostPlayerId,
+          },
+        });
+        break;
+      }
     }
   },
 
