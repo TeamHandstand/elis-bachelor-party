@@ -126,26 +126,6 @@ export interface GetProgressResponse {
   }>;
 }
 
-// ---------- POST /api/events/:code/finish ----------
-// Called by clients when they detect their team has completed all challenges.
-// Server is the source of truth for "first to complete" — DB row update is atomic.
-// Returns { winnerTeamId } so clients can display correct UI.
-export interface FinishEventRequest {
-  teamId: string;
-  // include current snapshot so server can persist final_progress
-  finalProgress: Array<{
-    teamId: string;
-    challenge: ChallengeId;
-    value: number;
-    completed: boolean;
-    completedAt: number | null;
-  }>;
-}
-export interface FinishEventResponse {
-  winnerTeamId: string;
-  alreadyFinished: boolean;
-}
-
 // ---------- GET /api/events/:code/results ----------
 // Final standings after event finishes.
 export interface ResultsResponse {
