@@ -80,11 +80,20 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
   liveLevels: {},
 
   bootstrap: ({ event, teams, players, myPlayerId, myDeviceId }) => {
+    const state = get();
+    // Preserve in-memory progress when re-bootstrapping the SAME event
+    // (e.g. navigating /play <-> /play/[challenge]). Otherwise PubNub
+    // history-replay gaps (lossy retention, or live dB messages flooding
+    // the recent-100 window) would silently drop accumulated taps/steps/etc.
+    // For a different event, start clean.
+    const sameEvent = state.event?.id === event.id;
+
     const teamMap: Record<string, Team> = {};
-    const progress: Record<string, TeamProgress> = {};
+    const newProgress: Record<string, TeamProgress> = {};
     for (const t of teams) {
       teamMap[t.id] = t;
-      progress[t.id] = emptyProgress();
+      newProgress[t.id] =
+        sameEvent && state.progress[t.id] ? state.progress[t.id] : emptyProgress();
     }
     const playerMap: Record<string, Player> = {};
     for (const p of players) playerMap[p.id] = p;
@@ -94,7 +103,7 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
       event,
       teams: teamMap,
       players: playerMap,
-      progress,
+      progress: newProgress,
       myPlayerId,
       myDeviceId,
       myTeamId: me?.teamId ?? null,
