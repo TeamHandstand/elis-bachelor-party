@@ -61,6 +61,22 @@ export interface ToastyStore {
   // Recompute completion flags for a team based on current progress.
   recomputeCompletion(teamId: string): void;
 
+  // Apply a server-persisted progress snapshot. Used on first bootstrap to
+  // recover state across page refreshes. Per-cell MAX-merge with what's
+  // already in memory so we don't lose more-recent live updates.
+  hydrateProgress(
+    rows: Array<{
+      teamId: string;
+      challenge: ChallengeId;
+      value: number;
+      completed: boolean;
+      completedAt: number | null;
+    }>,
+  ): void;
+
+  // Wipe all team progress (used when host resets).
+  clearAllProgress(): void;
+
   // ---- selectors (only methods returning STABLE references; arrays/derived
   //   collections live in lib/store/selectors.ts as memoized hooks to avoid
   //   useSyncExternalStore tearing → React #185 in production) ----
@@ -195,6 +211,11 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
       case "team-assigned":
         // Roster mutations: caller refetches via API (these messages just nudge)
         break;
+
+      case "progress-reset": {
+        get().clearAllProgress();
+        break;
+      }
     }
   },
 
@@ -264,5 +285,48 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
   getMyTeamProgress: () => {
     const s = get();
     return s.myTeamId ? s.progress[s.myTeamId] ?? null : null;
+  },
+
+  hydrateProgress: (rows) => {
+    const state = get();
+    if (rows.length === 0) return;
+    const newProgress: Record<string, TeamProgress> = { ...state.progress };
+
+    for (const row of rows) {
+      const teamProg = newProgress[row.teamId] ?? emptyProgress();
+      const cur = teamProg[row.challenge];
+      if (!cur) continue;
+      // Per-cell MAX-merge: don't regress live updates that arrived before
+      // the persisted snapshot loaded.
+      const value = Math.max(cur.value, row.value);
+      const completed = cur.completed || row.completed;
+      const completedAt =
+        cur.completedAt ?? row.completedAt ?? null;
+      newProgress[row.teamId] = {
+        ...teamProg,
+        [row.challenge]: {
+          ...cur,
+          value,
+          completed,
+          completedAt,
+        },
+      };
+    }
+
+    set({ progress: newProgress });
+    // Re-evaluate completion flags for affected teams.
+    const affectedTeams = new Set(rows.map((r) => r.teamId));
+    for (const teamId of affectedTeams) {
+      get().recomputeCompletion(teamId);
+    }
+  },
+
+  clearAllProgress: () => {
+    const state = get();
+    const newProgress: Record<string, TeamProgress> = {};
+    for (const teamId of Object.keys(state.progress)) {
+      newProgress[teamId] = emptyProgress();
+    }
+    set({ progress: newProgress, liveLevels: {} });
   },
 }));

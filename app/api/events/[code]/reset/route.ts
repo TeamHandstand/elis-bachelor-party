@@ -48,6 +48,12 @@ export async function POST(
   }
 
   try {
+    // progress-reset wipes all clients' in-memory progress immediately.
+    // event-state confirms the new status (lobby/active).
+    await publishFromServer(code, {
+      kind: "progress-reset",
+      ts: Date.now(),
+    });
     await publishFromServer(code, {
       kind: "event-state",
       status: parsed.data.mode === "lobby" ? "lobby" : "active",

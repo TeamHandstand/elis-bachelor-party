@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
+import { useProgressFlush } from "@/lib/store/flush";
 import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
 import { CHALLENGE_ORDER, CHALLENGES } from "@/lib/challenges";
@@ -37,6 +38,7 @@ export default function PlayPage() {
   }, [code, router]);
 
   useEventBootstrap(code, myPlayerId);
+  useProgressFlush(code);
 
   // Wake-lock the dashboard so the screen stays on.
   useEffect(() => {

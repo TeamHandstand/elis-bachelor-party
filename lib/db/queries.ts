@@ -381,6 +381,74 @@ export async function resetEventToLobby(code: string): Promise<{
   };
 }
 
+/**
+ * Upsert a team's progress snapshot with MAX semantics. Multiple players
+ * on the same team may flush concurrently; the most-advanced value wins.
+ * Once `completed` is true, it stays true; the earliest completedAt is kept.
+ */
+export async function upsertProgressSnapshot(input: {
+  eventId: string;
+  teamId: string;
+  challenges: Array<{
+    challenge: ChallengeId;
+    value: number;
+    completed: boolean;
+    completedAt: number | null;
+  }>;
+}): Promise<void> {
+  if (input.challenges.length === 0) return;
+  for (const c of input.challenges) {
+    await db.execute(sql`
+      INSERT INTO final_progress (event_id, team_id, challenge, value, completed, completed_at)
+      VALUES (
+        ${input.eventId},
+        ${input.teamId},
+        ${c.challenge},
+        ${String(c.value)},
+        ${c.completed},
+        ${c.completedAt ? new Date(c.completedAt).toISOString() : null}
+      )
+      ON CONFLICT (event_id, team_id, challenge) DO UPDATE SET
+        value = GREATEST(final_progress.value, EXCLUDED.value),
+        completed = final_progress.completed OR EXCLUDED.completed,
+        completed_at = COALESCE(final_progress.completed_at, EXCLUDED.completed_at)
+    `);
+  }
+}
+
+/**
+ * Fetch persisted progress for all teams in an event. Used by clients on
+ * first bootstrap to recover state across page refreshes.
+ */
+export async function getEventProgress(code: string): Promise<Array<{
+  teamId: string;
+  challenge: ChallengeId;
+  value: number;
+  completed: boolean;
+  completedAt: number | null;
+}> | null> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return null;
+
+  const rows = await db
+    .select()
+    .from(finalProgress)
+    .where(eq(finalProgress.eventId, eventRow.id));
+
+  return rows.map((r) => ({
+    teamId: r.teamId,
+    challenge: r.challenge as ChallengeId,
+    value: Number(r.value),
+    completed: r.completed,
+    completedAt: r.completedAt ? r.completedAt.getTime() : null,
+  }));
+}
+
 export async function tryFinishEvent(input: {
   code: string;
   teamId: string;
@@ -415,18 +483,26 @@ export async function tryFinishEvent(input: {
     // Persist final progress rows. Best effort — if insert fails, the event
     // is still finished, but we surface the error to the caller.
     if (input.finalProgress.length > 0) {
-      const values = input.finalProgress.map((p) => ({
-        eventId: eventRow.id,
-        teamId: p.teamId,
-        challenge: p.challenge,
-        value: String(p.value),
-        completed: p.completed,
-        completedAt: p.completedAt ? new Date(p.completedAt) : null,
-      }));
-      await db
-        .insert(finalProgress)
-        .values(values)
-        .onConflictDoNothing();
+      // Upsert with MAX semantics — in-event flushes from the hybrid
+      // persistence path may already have rows; preserve the most-advanced
+      // value and the earliest completion timestamp.
+      for (const p of input.finalProgress) {
+        await db.execute(sql`
+          INSERT INTO final_progress (event_id, team_id, challenge, value, completed, completed_at)
+          VALUES (
+            ${eventRow.id},
+            ${p.teamId},
+            ${p.challenge},
+            ${String(p.value)},
+            ${p.completed},
+            ${p.completedAt ? new Date(p.completedAt).toISOString() : null}
+          )
+          ON CONFLICT (event_id, team_id, challenge) DO UPDATE SET
+            value = GREATEST(final_progress.value, EXCLUDED.value),
+            completed = final_progress.completed OR EXCLUDED.completed,
+            completed_at = COALESCE(final_progress.completed_at, EXCLUDED.completed_at)
+        `);
+      }
     }
 
     return {

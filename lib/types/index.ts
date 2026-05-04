@@ -86,6 +86,11 @@ export interface TeamAssignmentMsg {
   ts: number;
 }
 
+export interface ProgressResetMsg {
+  kind: "progress-reset";
+  ts: number;
+}
+
 export type ProgressMsg =
   | ProgressDeltaMsg
   | LiveLevelMsg
@@ -93,7 +98,8 @@ export type ProgressMsg =
   | CompleteMsg
   | EventStateMsg
   | PlayerJoinedMsg
-  | TeamAssignmentMsg;
+  | TeamAssignmentMsg
+  | ProgressResetMsg;
 
 // ----- Domain entities (mirror DB rows; serializable for client use) -----
 

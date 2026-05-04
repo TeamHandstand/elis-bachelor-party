@@ -96,6 +96,36 @@ export interface ResetEventResponse {
   players: Player[];
 }
 
+// ---------- POST /api/events/:code/progress ----------
+// Client flushes its team's current progress snapshot. Server upserts with
+// MAX semantics so the most-advanced sample wins (multiple players on the
+// same team can flush concurrently).
+export interface ProgressSnapshotRequest {
+  teamId: string;
+  challenges: Array<{
+    challenge: ChallengeId;
+    value: number;
+    completed: boolean;
+    completedAt: number | null;
+  }>;
+}
+export interface ProgressSnapshotResponse {
+  ok: true;
+}
+
+// ---------- GET /api/events/:code/progress ----------
+// Returns persisted progress for all teams in this event. Used by clients
+// on first bootstrap to recover state across page refreshes.
+export interface GetProgressResponse {
+  progress: Array<{
+    teamId: string;
+    challenge: ChallengeId;
+    value: number;
+    completed: boolean;
+    completedAt: number | null;
+  }>;
+}
+
 // ---------- POST /api/events/:code/finish ----------
 // Called by clients when they detect their team has completed all challenges.
 // Server is the source of truth for "first to complete" — DB row update is atomic.

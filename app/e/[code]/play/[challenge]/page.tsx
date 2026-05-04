@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
+import { useProgressFlush } from "@/lib/store/flush";
 import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
 import { CHALLENGES } from "@/lib/challenges";
@@ -47,6 +48,7 @@ export default function ChallengePage() {
   }, [code, router]);
 
   useEventBootstrap(code, myPlayerId);
+  useProgressFlush(code);
 
   // Wake-lock for the duration of the challenge view.
   useEffect(() => {

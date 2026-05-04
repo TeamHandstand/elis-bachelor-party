@@ -8,7 +8,10 @@ import {
   subscribeToEvent,
 } from "@/lib/pubnub/client";
 import { getOrCreateDeviceId } from "@/lib/utils/device";
-import type { GetEventResponse } from "@/lib/api/contract";
+import type {
+  GetEventResponse,
+  GetProgressResponse,
+} from "@/lib/api/contract";
 import type { ProgressMsg } from "@/lib/types";
 
 // Module-scope: which event codes have already been hydrated from PubNub
@@ -32,6 +35,7 @@ const hydratedEventCodes = new Set<string>();
 export function useEventBootstrap(code: string, myPlayerId: string | null): void {
   const bootstrap = useToastyStore((s) => s.bootstrap);
   const receive = useToastyStore((s) => s.receive);
+  const hydrateProgress = useToastyStore((s) => s.hydrateProgress);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +60,21 @@ export function useEventBootstrap(code: string, myPlayerId: string | null): void
       const client = getPubNubClient(myPlayerId ?? deviceId);
 
       if (!hydratedEventCodes.has(code)) {
+        // First mount of this event in the session — pull persisted progress
+        // from the DB (the source of truth for refresh-resilience), then
+        // top up with any in-flight PubNub history that landed since the
+        // last server flush.
+        try {
+          const progressRes = await fetch(`/api/events/${code}/progress`);
+          if (progressRes.ok) {
+            const progressData = (await progressRes.json()) as GetProgressResponse;
+            if (!cancelled) {
+              hydrateProgress(progressData.progress);
+            }
+          }
+        } catch (err) {
+          console.warn("[bootstrap] progress fetch failed", err);
+        }
         try {
           const history = await fetchHistory(client, code, 100);
           for (const msg of history) receive(msg);
@@ -75,7 +94,7 @@ export function useEventBootstrap(code: string, myPlayerId: string | null): void
       cancelled = true;
       unsub?.();
     };
-  }, [code, myPlayerId, bootstrap, receive]);
+  }, [code, myPlayerId, bootstrap, receive, hydrateProgress]);
 }
 
 /**
