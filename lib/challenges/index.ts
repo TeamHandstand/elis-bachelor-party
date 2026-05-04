@@ -90,3 +90,13 @@ export function defaultChallengeConfig(): EventConfig["challenges"] {
   }
   return out as EventConfig["challenges"];
 }
+
+/**
+ * Filter CHALLENGE_ORDER down to only the challenges enabled in this event.
+ * Used to drive the heptathlon: round N maps to enabledChallengeOrder(event)[N].
+ */
+export function enabledChallengeOrder(
+  challenges: EventConfig["challenges"],
+): ChallengeId[] {
+  return CHALLENGE_ORDER.filter((id) => challenges[id]?.enabled);
+}
