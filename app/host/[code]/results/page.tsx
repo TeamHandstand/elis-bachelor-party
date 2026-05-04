@@ -57,20 +57,25 @@ export default async function ResultsPage({ params }: PageProps) {
     matrix[row.teamId][row.challenge] = row;
   }
 
-  // Compute completion stats per team for ranking display
+  // Round-wins-based ranking (heptathlon model).
+  const winnersByRound = event.roundWinners ?? [];
+  const winsByTeam = new Map<string, number[]>();
+  winnersByRound.forEach((w, idx) => {
+    const arr = winsByTeam.get(w.teamId) ?? [];
+    arr.push(idx);
+    winsByTeam.set(w.teamId, arr);
+  });
+
   const ranked = teams
-    .map((team) => {
-      const tm = matrix[team.id] ?? {};
-      const completed = enabled.filter((id) => tm[id]?.completed).length;
-      const northErr = (tm.north?.value ?? 0) as number;
-      return { team, completed, northErr, tm };
-    })
+    .map((team) => ({
+      team,
+      wins: winsByTeam.get(team.id) ?? [],
+      tm: matrix[team.id] ?? {},
+    }))
     .sort((a, b) => {
-      if (b.completed !== a.completed) return b.completed - a.completed;
-      // For tiebreak we don't have per-guess error sums in the snapshot;
-      // approximate with stored 'value' for north (which is guess count) — fine
-      // for display; the "real" tiebreaker logic lives in the live store.
-      return a.northErr - b.northErr;
+      if (b.wins.length !== a.wins.length)
+        return b.wins.length - a.wins.length;
+      return a.team.name.localeCompare(b.team.name);
     });
 
   const winner =
@@ -136,10 +141,44 @@ export default async function ResultsPage({ params }: PageProps) {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs opacity-70">completed</div>
+                    <div className="text-xs opacity-70">round wins</div>
                     <div className="font-display text-2xl font-extrabold">
-                      {r.completed}/{enabled.length}
+                      {r.wins.length}
                     </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+
+        <section className="bg-bg-card rounded-xl2 p-4">
+          <h2 className="font-display text-xl font-bold mb-3">
+            🏁 Round-by-round
+          </h2>
+          <ol className="space-y-2">
+            {enabled.map((id, idx) => {
+              const def = CHALLENGES[id];
+              const w = winnersByRound[idx];
+              const winningTeam = w ? teams.find((t) => t.id === w.teamId) : null;
+              return (
+                <li
+                  key={id}
+                  className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0"
+                >
+                  <div className="font-display font-extrabold opacity-60 w-6 text-center tabular-nums">
+                    {idx + 1}
+                  </div>
+                  <div className="text-2xl">{def.emoji}</div>
+                  <div className="flex-1 truncate font-bold">{def.label}</div>
+                  <div>
+                    {winningTeam ? (
+                      <span>
+                        🥇 {winningTeam.emoji} {winningTeam.name}
+                      </span>
+                    ) : (
+                      <span className="opacity-40">—</span>
+                    )}
                   </div>
                 </li>
               );
