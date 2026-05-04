@@ -55,11 +55,11 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
     id: "spin",
     label: "Spin Cycle",
     emoji: "🌀",
-    defaultThreshold: 30, // 10 per player × 3 players
+    defaultThreshold: 100,
     unit: "rotations",
-    aggregation: "per-player",
-    description: "Each teammate spins their body 10 full rotations while holding two on-screen buttons.",
-    formatProgress: (v, t) => `${Math.floor(v)} / ${t} spins`,
+    aggregation: "team-total",
+    description: "Spin in place until your team racks up 100 rotations. Must hold both on-screen buttons.",
+    formatProgress: (v, t) => `${Math.floor(v).toLocaleString()} / ${t.toLocaleString()} spins`,
   },
   north: {
     id: "north",
