@@ -9,6 +9,7 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "migrate": "node scripts/migrate.mjs",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
