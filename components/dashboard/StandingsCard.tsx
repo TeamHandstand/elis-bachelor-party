@@ -1,11 +1,12 @@
 "use client";
 
 import { useToastyStore } from "@/lib/store";
+import { useStandings } from "@/lib/store/selectors";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
 export function StandingsCard() {
-  const standings = useToastyStore((s) => s.getStandings());
+  const standings = useStandings();
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const event = useToastyStore((s) => s.event);
 

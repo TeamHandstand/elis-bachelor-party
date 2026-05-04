@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
+import { useStandings } from "@/lib/store/selectors";
 import { normalizeEventCode } from "@/lib/utils/code";
 
 export default function DonePage() {
@@ -21,7 +22,7 @@ export default function DonePage() {
   useEventBootstrap(code, myPlayerId);
 
   const event = useToastyStore((s) => s.event);
-  const standings = useToastyStore((s) => s.getStandings());
+  const standings = useStandings();
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const teams = useToastyStore((s) => s.teams);
   const progressMap = useToastyStore((s) => s.progress);

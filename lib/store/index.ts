@@ -61,10 +61,10 @@ export interface ToastyStore {
   // Recompute completion flags for a team based on current progress.
   recomputeCompletion(teamId: string): void;
 
-  // ---- selectors ----
+  // ---- selectors (only methods returning STABLE references; arrays/derived
+  //   collections live in lib/store/selectors.ts as memoized hooks to avoid
+  //   useSyncExternalStore tearing → React #185 in production) ----
   getMyTeam(): Team | null;
-  getTeammates(): Player[];
-  getStandings(): Array<{ team: Team; completedCount: number; northErrSum: number }>;
   isTeamFinished(teamId: string): boolean;
   getMyTeamProgress(): TeamProgress | null;
 }
@@ -241,30 +241,6 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
   getMyTeam: () => {
     const s = get();
     return s.myTeamId ? s.teams[s.myTeamId] ?? null : null;
-  },
-
-  getTeammates: () => {
-    const s = get();
-    if (!s.myTeamId) return [];
-    return Object.values(s.players).filter((p) => p.teamId === s.myTeamId);
-  },
-
-  getStandings: () => {
-    const s = get();
-    const ev = s.event;
-    if (!ev) return [];
-    const enabled = CHALLENGE_ORDER.filter((id) => ev.challenges[id]?.enabled);
-    return Object.values(s.teams)
-      .map((team) => {
-        const tp = s.progress[team.id];
-        const completedCount = tp ? enabled.filter((id) => tp[id]?.completed).length : 0;
-        const northErrSum = tp?.north?.guesses?.reduce((sum, g) => sum + g.errorDeg, 0) ?? 0;
-        return { team, completedCount, northErrSum };
-      })
-      .sort((a, b) => {
-        if (b.completedCount !== a.completedCount) return b.completedCount - a.completedCount;
-        return a.northErrSum - b.northErrSum;
-      });
   },
 
   isTeamFinished: (teamId) => {

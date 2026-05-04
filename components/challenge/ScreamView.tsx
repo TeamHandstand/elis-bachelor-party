@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useToastyStore } from "@/lib/store";
+import { useTeammates } from "@/lib/store/selectors";
 import { usePublisher } from "@/lib/store/bootstrap";
 import { CHALLENGES } from "@/lib/challenges";
 import { DbMeter } from "@/lib/sensors/db-meter";
@@ -18,7 +19,7 @@ const SCREAM_DB = 80;
 export function ScreamView({ code, myPlayerId }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
-  const teammates = useToastyStore((s) => s.getTeammates());
+  const teammates = useTeammates();
   const liveLevels = useToastyStore((s) => s.liveLevels);
   const event = useToastyStore((s) => s.event);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());

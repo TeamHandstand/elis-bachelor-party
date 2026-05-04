@@ -1,5 +1,5 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useToastyStore } from "@/lib/store";
 import {
   fetchHistory,
@@ -68,13 +68,16 @@ export function useEventBootstrap(code: string, myPlayerId: string | null): void
 }
 
 /**
- * Convenience: get a publisher bound to a code.
- * Sensors call this and publish their own progress messages.
+ * Convenience: get a publisher bound to a code. Memoized — stable function
+ * reference across renders (only changes if `code` does), so it's safe
+ * to use in useEffect dependency arrays without re-mounting effects.
  */
 export function usePublisher(code: string): (msg: ProgressMsg) => Promise<void> {
-  return async (msg: ProgressMsg) => {
-    const deviceId = getOrCreateDeviceId();
-    const client = getPubNubClient(deviceId);
-    await publishToEvent(client, code, msg);
-  };
+  return useMemo(() => {
+    return async (msg: ProgressMsg) => {
+      const deviceId = getOrCreateDeviceId();
+      const client = getPubNubClient(deviceId);
+      await publishToEvent(client, code, msg);
+    };
+  }, [code]);
 }

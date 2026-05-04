@@ -1,6 +1,7 @@
 "use client";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
+import { useStandings } from "@/lib/store/selectors";
 import { CHALLENGES, CHALLENGE_ORDER } from "@/lib/challenges";
 import type { ChallengeId, Player, Team, TeamProgress } from "@/lib/types";
 
@@ -16,7 +17,7 @@ export default function HostMonitor({ code }: Props) {
   const teams = useToastyStore((s) => s.teams);
   const players = useToastyStore((s) => s.players);
   const progress = useToastyStore((s) => s.progress);
-  const getStandings = useToastyStore((s) => s.getStandings);
+  const standings = useStandings();
 
   if (!event) {
     return (
@@ -26,7 +27,6 @@ export default function HostMonitor({ code }: Props) {
     );
   }
 
-  const standings = getStandings();
   const enabled = CHALLENGE_ORDER.filter((id) => event.challenges[id]?.enabled);
 
   return (

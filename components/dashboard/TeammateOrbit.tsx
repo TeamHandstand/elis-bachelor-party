@@ -1,6 +1,7 @@
 "use client";
 
 import { useToastyStore } from "@/lib/store";
+import { useTeammates } from "@/lib/store/selectors";
 import { CHALLENGES } from "@/lib/challenges";
 import type { ChallengeId, Player, TeamProgress } from "@/lib/types";
 
@@ -43,7 +44,7 @@ function formatStat(challenge: ChallengeId, value: number): string {
 }
 
 export function TeammateOrbit() {
-  const teammates = useToastyStore((s) => s.getTeammates());
+  const teammates = useTeammates();
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
   const myPlayerId = useToastyStore((s) => s.myPlayerId);
 

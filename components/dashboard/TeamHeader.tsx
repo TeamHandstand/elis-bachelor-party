@@ -1,6 +1,7 @@
 "use client";
 
 import { useToastyStore } from "@/lib/store";
+import { useStandings } from "@/lib/store/selectors";
 import { CHALLENGE_ORDER } from "@/lib/challenges";
 
 const PLACE_LABELS = ["1st", "2nd", "3rd", "4th", "5th"];
@@ -8,7 +9,7 @@ const PLACE_LABELS = ["1st", "2nd", "3rd", "4th", "5th"];
 export function TeamHeader() {
   const team = useToastyStore((s) => s.getMyTeam());
   const event = useToastyStore((s) => s.event);
-  const standings = useToastyStore((s) => s.getStandings());
+  const standings = useStandings();
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
 
   if (!team || !event) {
