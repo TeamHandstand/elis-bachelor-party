@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
-import { useStandings } from "@/lib/store/selectors";
+import { useRoundStandings } from "@/lib/store/selectors";
+import { CHALLENGES, enabledChallengeOrder } from "@/lib/challenges";
 import { normalizeEventCode } from "@/lib/utils/code";
 
 export default function DonePage() {
@@ -22,35 +23,16 @@ export default function DonePage() {
   useEventBootstrap(code, myPlayerId);
 
   const event = useToastyStore((s) => s.event);
-  const standings = useStandings();
+  const standings = useRoundStandings();
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const teams = useToastyStore((s) => s.teams);
-  const progressMap = useToastyStore((s) => s.progress);
-  const players = useToastyStore((s) => s.players);
 
   const winnerTeamId = event?.winnerTeamId ?? standings[0]?.team.id ?? null;
   const won = !!myTeamId && myTeamId === winnerTeamId;
-
   const winnerTeam = winnerTeamId ? teams[winnerTeamId] : null;
 
-  const northBreakdown = useMemo(() => {
-    const out: Array<{
-      team: string;
-      emoji: string;
-      guesses: Array<{ name: string; err: number }>;
-      total: number;
-    }> = [];
-    for (const team of Object.values(teams)) {
-      const guesses = progressMap[team.id]?.north?.guesses ?? [];
-      const annotated = guesses.map((g) => ({
-        name: players[g.playerId]?.name ?? "?",
-        err: g.errorDeg,
-      }));
-      const total = guesses.reduce((s, g) => s + g.errorDeg, 0);
-      out.push({ team: team.name, emoji: team.emoji, guesses: annotated, total });
-    }
-    return out.sort((a, b) => a.total - b.total);
-  }, [teams, progressMap, players]);
+  const order = event ? enabledChallengeOrder(event.challenges) : [];
+  const winners = event?.roundWinners ?? [];
 
   return (
     <main className="min-h-screen flex flex-col p-5 safe-top safe-bottom">
@@ -87,48 +69,51 @@ export default function DonePage() {
                 {isMine ? " (us)" : ""}
               </span>
               <span className="tabular-nums font-bold">
-                {row.completedCount} done
+                {row.wins} {row.wins === 1 ? "win" : "wins"}
               </span>
             </div>
           );
         })}
       </div>
 
-      {northBreakdown.some((t) => t.guesses.length > 0) && (
-        <div className="rounded-2xl bg-bg-card p-4 mb-4">
-          <div className="text-[10px] uppercase tracking-widest opacity-60 mb-2 font-bold">
-            🧭 due north tiebreaker
-          </div>
-          {northBreakdown.map((t) => (
-            <div key={t.team} className="py-2 border-b border-bg-deep/40 last:border-0">
-              <div className="flex justify-between items-center">
-                <span className="font-bold">
-                  {t.emoji} {t.team}
-                </span>
-                <span className="tabular-nums text-accent-orange font-extrabold">
-                  {t.total.toFixed(0)}° total err
-                </span>
-              </div>
-              {t.guesses.length > 0 && (
-                <div className="text-xs opacity-70 mt-1 flex gap-2 flex-wrap">
-                  {t.guesses.map((g, i) => (
-                    <span key={i}>
-                      {g.name}: {g.err.toFixed(0)}°
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+      <div className="rounded-2xl bg-bg-card p-4 mb-4">
+        <div className="text-[10px] uppercase tracking-widest opacity-60 mb-2 font-bold">
+          round-by-round
         </div>
-      )}
+        {order.map((id, idx) => {
+          const def = CHALLENGES[id];
+          const w = winners[idx];
+          const winningTeam = w ? teams[w.teamId] : null;
+          return (
+            <div
+              key={id}
+              className="flex items-center gap-3 py-2 border-b border-bg-deep/40 last:border-0"
+            >
+              <div className="font-display font-extrabold text-sm opacity-60 w-6 text-center tabular-nums">
+                {idx + 1}
+              </div>
+              <div className="text-2xl">{def.emoji}</div>
+              <div className="flex-1 truncate font-bold">{def.label}</div>
+              <div className="text-sm">
+                {winningTeam ? (
+                  <>
+                    🥇 {winningTeam.emoji} {winningTeam.name}
+                  </>
+                ) : (
+                  <span className="opacity-40">—</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       <div className="mt-auto flex flex-col items-center gap-3 pb-4">
         <Link
           href={`/e/${code}/play`}
           className="text-xs opacity-60 underline"
         >
-          back to dashboard
+          back to journey
         </Link>
         <Link
           href="/"
