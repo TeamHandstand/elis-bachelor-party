@@ -6,8 +6,10 @@ import {
   jsonb,
   numeric,
   boolean,
+  integer,
   primaryKey,
 } from "drizzle-orm/pg-core";
+import type { RoundWinnerEntry } from "@/lib/types";
 
 export const events = pgTable("events", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -20,6 +22,11 @@ export const events = pgTable("events", {
   startedAt: timestamp("started_at", { withTimezone: true }),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   winnerTeamId: uuid("winner_team_id"),
+  hostPlayerId: uuid("host_player_id"),
+  currentRoundIndex: integer("current_round_index"),
+  currentRoundStatus: text("current_round_status"), // 'live' | 'decided' | null
+  currentRoundStartsAt: timestamp("current_round_starts_at", { withTimezone: true }),
+  roundWinners: jsonb("round_winners").$type<RoundWinnerEntry[]>().notNull().default([]),
 });
 
 export const teams = pgTable("teams", {
