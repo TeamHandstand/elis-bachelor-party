@@ -583,3 +583,40 @@ export async function getResults(code: string): Promise<{
     })),
   };
 }
+
+/**
+ * Set or clear the host player for an event. Returns the updated event config,
+ * or { error: 'not-found' } if the event doesn't exist, or { error: 'invalid-player' }
+ * if a playerId was supplied but doesn't belong to this event.
+ */
+export async function setHostPlayer(input: {
+  code: string;
+  playerId: string | null;
+}): Promise<{ event: EventConfig } | { error: "not-found" | "invalid-player" }> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  if (input.playerId !== null) {
+    const matching = await db
+      .select({ id: players.id })
+      .from(players)
+      .where(
+        and(eq(players.id, input.playerId), eq(players.eventId, eventRow.id)),
+      )
+      .limit(1);
+    if (!matching[0]) return { error: "invalid-player" };
+  }
+
+  const updated = await db
+    .update(events)
+    .set({ hostPlayerId: input.playerId })
+    .where(eq(events.id, eventRow.id))
+    .returning();
+  const newRow = updated[0] ?? eventRow;
+  return { event: eventRowToConfig(newRow) };
+}
