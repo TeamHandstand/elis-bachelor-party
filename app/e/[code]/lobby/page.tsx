@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
+import { startRound } from "@/components/host/_fetch";
 
 export default function LobbyPage() {
   const router = useRouter();
@@ -33,6 +34,46 @@ export default function LobbyPage() {
   const myTeam = useToastyStore((s) => s.getMyTeam());
 
   const me = myPlayerId ? players[myPlayerId] : null;
+
+  // Host detection: either designated host-player OR has the host cookie.
+  const isHostPlayer =
+    !!myPlayerId && event?.hostPlayerId === myPlayerId;
+  const [isCookieHost, setIsCookieHost] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/host/me", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { isHost: boolean };
+        if (!cancelled) setIsCookieHost(!!data.isHost);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const isHost = isHostPlayer || isCookieHost;
+
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  async function handleStart() {
+    if (starting) return;
+    setStarting(true);
+    setStartError(null);
+    try {
+      await startRound(code, {
+        ...(myPlayerId ? { playerId: myPlayerId } : {}),
+      });
+      // Server flips event.status='active' → bootstrap effect redirects to /play
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : "Couldn't start");
+      setStarting(false);
+    }
+  }
 
   // Periodic refetch of roster while in lobby (PubNub `player-joined` is just a nudge)
   useEffect(() => {
@@ -78,12 +119,30 @@ export default function LobbyPage() {
       <div className="text-center mt-8 mb-6">
         <div className="text-5xl mb-2">🍕</div>
         <div className="font-display text-2xl font-extrabold tracking-wider">
-          WAITING FOR THE HOST
+          {isHost ? "READY WHEN YOU ARE" : "WAITING FOR THE HOST"}
         </div>
         <div className="text-xs uppercase tracking-widest opacity-70 mt-1">
           event · {code}
         </div>
       </div>
+
+      {isHost && (
+        <div className="mb-4">
+          <button
+            type="button"
+            disabled={starting}
+            onClick={handleStart}
+            className="w-full py-4 rounded-2xl bg-gradient-party font-display text-lg font-extrabold tracking-widest disabled:opacity-50"
+          >
+            {starting ? "STARTING…" : "▶ START HEPTATHLON"}
+          </button>
+          {startError ? (
+            <div className="mt-2 text-xs text-accent-pink text-center">
+              {startError}
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {me && (
         <div className="rounded-2xl bg-gradient-party p-4 mb-4 text-center">
