@@ -7,6 +7,7 @@ import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
 import { activateEvent } from "@/components/host/_fetch";
+import { useCookieHost } from "@/lib/auth/use-cookie-host";
 
 export default function LobbyPage() {
   const router = useRouter();
@@ -39,23 +40,7 @@ export default function LobbyPage() {
   // Host detection: either designated host-player OR has the host cookie.
   const isHostPlayer =
     !!myPlayerId && event?.hostPlayerId === myPlayerId;
-  const [isCookieHost, setIsCookieHost] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/host/me", { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { isHost: boolean };
-        if (!cancelled) setIsCookieHost(!!data.isHost);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { isHost: isCookieHost } = useCookieHost();
   const isHost = isHostPlayer || isCookieHost;
 
   const [starting, setStarting] = useState(false);

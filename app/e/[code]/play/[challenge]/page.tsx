@@ -12,6 +12,12 @@ import { useStandings } from "@/lib/store/selectors";
 import type { ChallengeId } from "@/lib/types";
 import { CountdownOverlay } from "@/components/play/CountdownOverlay";
 import { RoundResults, type ResultEntry } from "@/components/play/RoundResults";
+import {
+  HostRoundControls,
+  type EndPickerEntry,
+} from "@/components/play/HostRoundControls";
+import { useCookieHost } from "@/lib/auth/use-cookie-host";
+import { endRound } from "@/components/host/_fetch";
 import { DistanceView } from "@/components/challenge/DistanceView";
 import { StepsView } from "@/components/challenge/StepsView";
 import { TapsView } from "@/components/challenge/TapsView";
@@ -77,6 +83,12 @@ export default function ChallengePage() {
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
   const standings = useStandings();
   const progressMap = useToastyStore((s) => s.progress);
+  const teamsMap = useToastyStore((s) => s.teams);
+
+  const isHostPlayer =
+    !!myPlayerId && event?.hostPlayerId === myPlayerId;
+  const { isHost: isCookieHost } = useCookieHost();
+  const isHost = isHostPlayer || isCookieHost;
 
   const isValid = useMemo(() => VALID_IDS.includes(challenge), [challenge]);
   const def = isValid ? CHALLENGES[challenge] : null;
@@ -195,6 +207,7 @@ export default function ChallengePage() {
   });
 
   const roundDecided = event?.currentRoundStatus === "decided";
+  const roundLive = event?.currentRoundStatus === "live";
   const myTeamDone = !!myCur?.completed;
   const showAllTeamResults = roundDecided;
   const showMyTeamResult = !roundDecided && myTeamDone;
@@ -203,6 +216,33 @@ export default function ChallengePage() {
       ? event.roundWinners[event.currentRoundIndex]?.teamId ?? null
       : null;
   const roundStartedAt = event?.currentRoundStartsAt ?? null;
+
+  // End-Round picker entries: every team's current progress for this round.
+  // HostRoundControls sorts internally (completed-first by completedAt) so
+  // the recommended winner is highlighted at the top.
+  const endPickerEntries: EndPickerEntry[] = Object.values(teamsMap).map(
+    (t) => {
+      const tp = progressMap[t.id]?.[challenge];
+      return {
+        team: t,
+        completedAt: tp?.completedAt ?? null,
+        value: tp?.value ?? 0,
+        threshold,
+      };
+    },
+  );
+
+  async function handleEndRound(winnerTeamId: string | null) {
+    try {
+      await endRound(code, {
+        mode: "host",
+        ...(myPlayerId ? { playerId: myPlayerId } : {}),
+        ...(winnerTeamId ? { teamId: winnerTeamId } : {}),
+      });
+    } catch (err) {
+      console.error("[challenge] endRound failed", err);
+    }
+  }
 
   return (
     <>
@@ -233,6 +273,21 @@ export default function ChallengePage() {
           </div>
           <div className="text-3xl">{def.emoji}</div>
         </header>
+        {/* Host's End Round affordance — pinned just under the header so
+            it's always reachable. Only shown while the round is live;
+            the picker pre-recommends the first finisher. */}
+        {isHost && roundLive && (
+          <div className="px-3 pt-3 bg-bg-deep">
+            <HostRoundControls
+              variant={{
+                kind: "end",
+                entries: endPickerEntries,
+                challenge,
+              }}
+              onEnd={handleEndRound}
+            />
+          </div>
+        )}
         {/* Live mini-leaderboard */}
         <div className="px-3 py-2 flex flex-wrap gap-2 bg-bg-deep/60 border-b border-white/5">
           {standings.map((row) => {

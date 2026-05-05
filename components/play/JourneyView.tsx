@@ -17,6 +17,7 @@ import { CountdownOverlay } from "./CountdownOverlay";
 import Link from "next/link";
 import { startRound, endRound, endEvent } from "@/components/host/_fetch";
 import { EndHeptathlonControls } from "./EndHeptathlonControls";
+import { useCookieHost } from "@/lib/auth/use-cookie-host";
 import type { ChallengeId } from "@/lib/types";
 
 interface Props {
@@ -38,23 +39,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
   // Cookie-host detection: anyone with a valid host cookie also gets host
   // controls, even without being the designated host-player. Lets Sam start
   // the race from the game UI without crowning himself first.
-  const [isCookieHost, setIsCookieHost] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/host/me", { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { isHost: boolean };
-        if (!cancelled) setIsCookieHost(!!data.isHost);
-      } catch {
-        /* ignore — non-host */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { isHost: isCookieHost } = useCookieHost();
 
   const isHost = isHostPlayer || isCookieHost;
   const teamList = useMemo(() => Object.values(teams), [teams]);
@@ -102,30 +87,11 @@ export function JourneyView({ code, myPlayerId }: Props) {
     }
   }, [event?.currentRoundStartsAt, event?.currentRoundStatus, event]);
 
-  // Auto-navigate to challenge view when countdown expires (or live with
-  // startsAt already past, e.g. on refresh).
-  useEffect(() => {
-    if (!event) return;
-    if (event.currentRoundStatus !== "live") return;
-    if (event.currentRoundIndex === null) return;
-    const startsAt = event.currentRoundStartsAt;
-    if (startsAt === null) return;
-    if (showCountdown) return;
-    if (Date.now() < startsAt) return;
-    const challenge = order[event.currentRoundIndex];
-    if (challenge) {
-      router.replace(`/e/${code}/play/${challenge}`);
-    }
-  }, [
-    event?.currentRoundStatus,
-    event?.currentRoundIndex,
-    event?.currentRoundStartsAt,
-    showCountdown,
-    order,
-    router,
-    code,
-    event,
-  ]);
+  // No auto-redirect to the live challenge from the journey. The countdown
+  // overlay handles the natural lobby→round transition (its onDone navigates
+  // when timer expires); after that, players who land on the journey can
+  // tap the glowing round card to enter. Otherwise the back button gets
+  // trapped in a loop with /play/[challenge].
 
   if (!event) return null;
 
