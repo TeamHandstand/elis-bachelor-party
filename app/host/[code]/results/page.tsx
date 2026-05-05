@@ -128,7 +128,13 @@ export default async function ResultsPage({ params }: PageProps) {
                   }`}
                 >
                   <div className="text-2xl w-8 text-center">
-                    {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"}
+                    {idx === 0
+                      ? "🥇"
+                      : idx === 1
+                        ? "🥈"
+                        : idx === 2
+                          ? "🥉"
+                          : `#${idx + 1}`}
                   </div>
                   <div className="text-3xl">{r.team.emoji}</div>
                   <div className="flex-1 min-w-0">

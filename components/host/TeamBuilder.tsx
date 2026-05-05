@@ -13,7 +13,12 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import type { EventConfig, Player, Team } from "@/lib/types";
-import { assignPlayer, patchEvent } from "./_fetch";
+import {
+  assignPlayer,
+  createTeam as createTeamFetch,
+  deleteTeam as deleteTeamFetch,
+  patchEvent,
+} from "./_fetch";
 
 interface Props {
   event: EventConfig;
@@ -93,32 +98,87 @@ export default function TeamBuilder({ event, teams, players, onChange }: Props) 
     }
   }
 
+  const [adding, setAdding] = useState(false);
+  async function addTeam() {
+    if (adding) return;
+    setAdding(true);
+    try {
+      const res = await createTeamFetch(event.code);
+      onChange({ teams: [...teams, res.team] });
+    } catch {
+      // Surface failures via the existing toast-less convention — no-op for now.
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function removeTeam(teamId: string) {
+    const team = teams.find((t) => t.id === teamId);
+    if (!team) return;
+    const memberCount = players.filter((p) => p.teamId === teamId).length;
+    const msg =
+      memberCount > 0
+        ? `Delete ${team.emoji} ${team.name}? ${memberCount} player(s) on this team will be moved back to the pool.`
+        : `Delete ${team.emoji} ${team.name}?`;
+    if (typeof window !== "undefined" && !window.confirm(msg)) return;
+
+    const optimisticTeams = teams.filter((t) => t.id !== teamId);
+    const optimisticPlayers = players.map((p) =>
+      p.teamId === teamId ? { ...p, teamId: null } : p,
+    );
+    onChange({ teams: optimisticTeams, players: optimisticPlayers });
+    try {
+      await deleteTeamFetch(event.code, teamId);
+    } catch {
+      // Roll back on failure.
+      onChange({ teams, players });
+    }
+  }
+
   const activePlayer = activeId ? playersById[activeId] : null;
 
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <section className="space-y-4">
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
           <h2 className="font-display text-xl font-bold">👥 Team builder</h2>
-          <p className="text-xs opacity-60">
-            Drag names from the pool into a team. Long-press on touch.
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs opacity-60 hidden sm:block">
+              Drag names from the pool into a team. Long-press on touch.
+            </p>
+            <button
+              type="button"
+              onClick={addTeam}
+              disabled={adding}
+              className="rounded-xl px-3 py-2 bg-gradient-party text-sm font-bold disabled:opacity-50"
+            >
+              {adding ? "…" : "+ Add team"}
+            </button>
+          </div>
         </div>
 
         <NamePool players={grouped.pool} />
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {teams.map((team, idx) => (
-            <TeamBox
-              key={team.id}
-              team={team}
-              players={grouped.byTeam[team.id] ?? []}
-              gradient={teamGradient(idx)}
-              onRename={(name) => updateTeam(team.id, { name })}
-              onEmoji={(emoji) => updateTeam(team.id, { emoji })}
-            />
-          ))}
-        </div>
+        {teams.length === 0 ? (
+          <div className="rounded-xl2 bg-bg-card p-6 text-center text-sm opacity-60">
+            No teams yet — tap{" "}
+            <span className="font-bold">+ Add team</span> to create one.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {teams.map((team, idx) => (
+              <TeamBox
+                key={team.id}
+                team={team}
+                players={grouped.byTeam[team.id] ?? []}
+                gradient={teamGradient(idx)}
+                onRename={(name) => updateTeam(team.id, { name })}
+                onEmoji={(emoji) => updateTeam(team.id, { emoji })}
+                onDelete={() => removeTeam(team.id)}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       <DragOverlay>
@@ -177,12 +237,14 @@ function TeamBox({
   gradient,
   onRename,
   onEmoji,
+  onDelete,
 }: {
   team: Team;
   players: Player[];
   gradient: string;
   onRename: (name: string) => void;
   onEmoji: (emoji: string) => void;
+  onDelete: () => void;
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: team.id });
   const [picking, setPicking] = useState(false);
@@ -209,12 +271,20 @@ function TeamBox({
   return (
     <div
       ref={setNodeRef}
-      className={`rounded-xl2 p-4 min-h-[180px] transition-all ${
+      className={`relative rounded-xl2 p-4 min-h-[180px] transition-all ${
         isOver
           ? "ring-2 ring-white scale-[1.01]"
           : "ring-1 ring-white/10"
       } ${gradient}`}
     >
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Delete team ${team.name}`}
+        className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/30 hover:bg-accent-pink/80 text-xs font-bold leading-none flex items-center justify-center"
+      >
+        ✕
+      </button>
       <div className="flex items-center gap-2 mb-3">
         <button
           onClick={() => setPicking((p) => !p)}

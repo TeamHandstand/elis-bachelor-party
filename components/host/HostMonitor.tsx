@@ -111,7 +111,13 @@ function TeamMonitorCard({
         </div>
         <div className="text-right">
           <div className="text-xs opacity-50 uppercase tracking-wide">
-            {place === 1 ? "🥇 1st" : place === 2 ? "🥈 2nd" : "🥉 3rd"}
+            {place === 1
+              ? "🥇 1st"
+              : place === 2
+                ? "🥈 2nd"
+                : place === 3
+                  ? "🥉 3rd"
+                  : `#${place}`}
           </div>
           <div className="font-display text-2xl font-extrabold">
             {wins} <span className="text-xs opacity-60">/ {totalRounds}</span>

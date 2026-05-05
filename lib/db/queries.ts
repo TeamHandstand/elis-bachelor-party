@@ -34,6 +34,18 @@ const DEFAULT_TEAMS: Array<{ name: string; emoji: string; color: string }> = [
   { name: "Hawaiian", emoji: "🍍", color: "from-accent-green to-accent-green2" },
 ];
 
+// Pool of presets used to suggest defaults when the host creates a new team
+// beyond the initial 3. Includes the originals + extras.
+const TEAM_PRESET_POOL: Array<{ name: string; emoji: string; color: string }> =
+  [
+    ...DEFAULT_TEAMS,
+    { name: "Sausage", emoji: "🌭", color: "from-accent-orange to-accent-pink" },
+    { name: "Mushroom", emoji: "🍄", color: "from-accent-blue to-accent-purple" },
+    { name: "BBQ Chicken", emoji: "🍗", color: "from-accent-green2 to-accent-blue" },
+    { name: "Anchovies", emoji: "🐟", color: "from-accent-purple to-accent-pink" },
+    { name: "Buffalo", emoji: "🌶️", color: "from-accent-orange to-accent-green2" },
+  ];
+
 // ----- Row → DTO mappers -----
 
 export function eventRowToConfig(row: EventRow): EventConfig {
@@ -949,4 +961,78 @@ export async function endRound(input: {
     eventFinished: isLastRound,
     alreadyDecided: false,
   };
+}
+
+/**
+ * Create a new team within an event. If name/emoji/color aren't supplied,
+ * picks the first preset whose name isn't already taken; falls back to
+ * "Team N" with a generic emoji once the preset pool is exhausted.
+ */
+export async function createTeam(input: {
+  code: string;
+  name?: string;
+  emoji?: string;
+  color?: string;
+}): Promise<{ team: Team } | { error: "not-found" }> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  const existing = await db
+    .select()
+    .from(teams)
+    .where(eq(teams.eventId, eventRow.id));
+  const usedNames = new Set(existing.map((t) => t.name));
+
+  const preset =
+    TEAM_PRESET_POOL.find((p) => !usedNames.has(p.name)) ?? {
+      name: `Team ${existing.length + 1}`,
+      emoji: "🍕",
+      color: "from-accent-pink to-accent-orange",
+    };
+
+  const inserted = await db
+    .insert(teams)
+    .values({
+      eventId: eventRow.id,
+      name: input.name?.trim() || preset.name,
+      emoji: input.emoji?.trim() || preset.emoji,
+      color: input.color?.trim() || preset.color,
+    })
+    .returning();
+
+  return { team: teamRowToTeam(inserted[0]) };
+}
+
+/**
+ * Delete a team. Players assigned to it are unassigned (FK ON DELETE SET NULL);
+ * any final_progress rows for the team are cascade-deleted (FK ON DELETE
+ * CASCADE). If the deleted team appears in `round_winners`, those entries
+ * remain pointing at the now-gone team id; UI handles missing teams as
+ * "—" / unknown winner. Refusing the delete instead would force the host to
+ * also redo every round the team won, which is worse UX.
+ */
+export async function deleteTeam(input: {
+  code: string;
+  teamId: string;
+}): Promise<{ ok: true } | { error: "not-found" | "team-not-in-event" }> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  const result = await db
+    .delete(teams)
+    .where(and(eq(teams.id, input.teamId), eq(teams.eventId, eventRow.id)))
+    .returning({ id: teams.id });
+
+  if (result.length === 0) return { error: "team-not-in-event" };
+  return { ok: true };
 }

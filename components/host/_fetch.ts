@@ -159,3 +159,27 @@ export async function endEvent(
     body,
   });
 }
+
+import type {
+  CreateTeamRequest,
+  CreateTeamResponse,
+} from "@/lib/api/contract";
+
+export async function createTeam(
+  code: string,
+  body: CreateTeamRequest = {},
+): Promise<CreateTeamResponse> {
+  return http<CreateTeamResponse>(`/api/events/${code}/teams`, {
+    method: "POST",
+    body,
+  });
+}
+
+export async function deleteTeam(
+  code: string,
+  teamId: string,
+): Promise<{ ok: true }> {
+  return http<{ ok: true }>(`/api/events/${code}/teams/${teamId}`, {
+    method: "DELETE",
+  });
+}

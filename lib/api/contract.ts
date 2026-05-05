@@ -91,6 +91,20 @@ export interface StartEventResponse {
   event: EventConfig;
 }
 
+// ---------- POST /api/events/:code/teams ----------
+// Host-cookie. Optional name/emoji/color; server picks sensible defaults.
+export interface CreateTeamRequest {
+  name?: string;
+  emoji?: string;
+  color?: string;
+}
+export interface CreateTeamResponse {
+  team: Team;
+}
+
+// ---------- DELETE /api/events/:code/teams/:teamId ----------
+// Host-cookie. Players on the team are unassigned; final_progress cascades.
+
 // ---------- POST /api/events/:code/end ----------
 // Force-end the heptathlon. Optional winnerTeamId crowns a champion;
 // otherwise the event ends with no winner.
