@@ -11,6 +11,7 @@ import { CHALLENGES, enabledChallengeOrder } from "@/lib/challenges";
 import { useStandings } from "@/lib/store/selectors";
 import type { ChallengeId } from "@/lib/types";
 import { CountdownOverlay } from "@/components/play/CountdownOverlay";
+import { RoundResults, type ResultEntry } from "@/components/play/RoundResults";
 import { DistanceView } from "@/components/challenge/DistanceView";
 import { StepsView } from "@/components/challenge/StepsView";
 import { TapsView } from "@/components/challenge/TapsView";
@@ -107,13 +108,10 @@ export default function ChallengePage() {
     code,
   ]);
 
-  // Auto-redirect to journey when the round is decided.
-  useEffect(() => {
-    if (!event) return;
-    if (event.currentRoundStatus === "decided") {
-      router.replace(`/e/${code}/play`);
-    }
-  }, [event?.currentRoundStatus, router, code, event]);
+  // No auto-redirect when the round becomes decided — players linger on
+  // this page to see the all-teams results. They can navigate back to the
+  // journey via the back arrow; the host advances to the next round, which
+  // triggers a round-start that lands everyone on the next challenge view.
 
   // No auto-end: every team gets a chance to keep going even after one
   // finishes. The host explicitly ends the round; the server prefers the
@@ -183,6 +181,29 @@ export default function ChallengePage() {
     ? def.formatProgress(myCur.value, threshold)
     : def.formatProgress(0, threshold);
 
+  const allTeams = useToastyStore.getState().teams;
+  const allPlayers = useToastyStore.getState().players;
+  const resultEntries: ResultEntry[] = Object.values(allTeams).map((t) => {
+    const tp = progressMap[t.id]?.[challenge];
+    return {
+      team: t,
+      value: tp?.value ?? 0,
+      completedAt: tp?.completedAt ?? null,
+      perPlayer: tp?.perPlayer,
+      guesses: tp?.guesses,
+    };
+  });
+
+  const roundDecided = event?.currentRoundStatus === "decided";
+  const myTeamDone = !!myCur?.completed;
+  const showAllTeamResults = roundDecided;
+  const showMyTeamResult = !roundDecided && myTeamDone;
+  const winnerForRound =
+    roundDecided && event && event.currentRoundIndex !== null
+      ? event.roundWinners[event.currentRoundIndex]?.teamId ?? null
+      : null;
+  const roundStartedAt = event?.currentRoundStartsAt ?? null;
+
   return (
     <>
       {showCountdown && event.currentRoundStartsAt !== null && (
@@ -237,14 +258,30 @@ export default function ChallengePage() {
             );
           })}
         </div>
-        {/* Team-finished banner — round still open; just signals to wait. */}
-        {myCur?.completed && (
-          <div className="px-3 py-3 bg-gradient-done text-center font-display font-extrabold tracking-widest text-sm">
-            ✅ YOUR TEAM FINISHED — keep going if you want, host will end the
-            round.
-          </div>
+        {showAllTeamResults ? (
+          <RoundResults
+            challenge={challenge}
+            threshold={threshold}
+            roundStartedAt={roundStartedAt}
+            myTeamId={myTeamId}
+            entries={resultEntries}
+            players={allPlayers}
+            mode="all-teams"
+            winnerTeamId={winnerForRound}
+          />
+        ) : showMyTeamResult ? (
+          <RoundResults
+            challenge={challenge}
+            threshold={threshold}
+            roundStartedAt={roundStartedAt}
+            myTeamId={myTeamId}
+            entries={resultEntries}
+            players={allPlayers}
+            mode="my-team"
+          />
+        ) : (
+          view
         )}
-        {view}
       </main>
     </>
   );

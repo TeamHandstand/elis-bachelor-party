@@ -1036,3 +1036,31 @@ export async function deleteTeam(input: {
   if (result.length === 0) return { error: "team-not-in-event" };
   return { ok: true };
 }
+
+/**
+ * Flip the event from 'lobby' to 'active' without starting a round. Used by
+ * the lobby's START HEPTATHLON button — moves all players to the journey
+ * view; the host then starts each individual round from there.
+ */
+export async function activateEvent(
+  code: string,
+): Promise<{ event: EventConfig } | { error: "not-found" }> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  const updated = await db
+    .update(events)
+    .set({
+      status: "active",
+      startedAt: eventRow.startedAt ?? new Date(),
+    })
+    .where(eq(events.id, eventRow.id))
+    .returning();
+
+  return { event: eventRowToConfig(updated[0] ?? eventRow) };
+}

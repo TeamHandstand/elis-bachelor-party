@@ -183,3 +183,18 @@ export async function deleteTeam(
     method: "DELETE",
   });
 }
+
+import type {
+  ActivateEventRequest,
+  ActivateEventResponse,
+} from "@/lib/api/contract";
+
+export async function activateEvent(
+  code: string,
+  body: ActivateEventRequest = {},
+): Promise<ActivateEventResponse> {
+  return http<ActivateEventResponse>(`/api/events/${code}/activate`, {
+    method: "POST",
+    body,
+  });
+}

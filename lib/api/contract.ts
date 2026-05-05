@@ -91,6 +91,16 @@ export interface StartEventResponse {
   event: EventConfig;
 }
 
+// ---------- POST /api/events/:code/activate ----------
+// Flips event status from 'lobby' to 'active' without starting a round.
+// Auth: host-cookie OR matching host-player.
+export interface ActivateEventRequest {
+  playerId?: string;
+}
+export interface ActivateEventResponse {
+  event: EventConfig;
+}
+
 // ---------- POST /api/events/:code/teams ----------
 // Host-cookie. Optional name/emoji/color; server picks sensible defaults.
 export interface CreateTeamRequest {

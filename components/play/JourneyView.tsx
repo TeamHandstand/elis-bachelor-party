@@ -161,13 +161,12 @@ export function JourneyView({ code, myPlayerId }: Props) {
     return { ordinal: idx + 1, challenge, state: { kind: "future" } };
   });
 
-  // Determine where the host's "start next" button should go.
+  // Determine where the host's "start next" button should go. Lobby has its
+  // own START HEPTATHLON button (which calls /activate); the journey only
+  // handles per-round starts once the event is active.
   let startTarget: { ordinal: number; label: string } | null = null;
-  if (
-    event.status === "lobby" ||
-    (currentStatus === null && event.roundWinners.length === 0)
-  ) {
-    startTarget = { ordinal: 1, label: "START HEPTATHLON" };
+  if (currentStatus === null && event.roundWinners.length === 0) {
+    startTarget = { ordinal: 1, label: "START ROUND 1" };
   } else if (
     currentStatus === "decided" &&
     (currentIdx ?? -1) + 1 < totalRounds
@@ -339,18 +338,6 @@ export function JourneyView({ code, myPlayerId }: Props) {
             );
           })}
         </div>
-
-        {/* Lobby start button (when no rounds have run yet and host is set) */}
-        {isHost &&
-          event.roundWinners.length === 0 &&
-          currentStatus === null && (
-            <div className="mt-4">
-              <HostRoundControls
-                variant={{ kind: "start", label: "START HEPTATHLON" }}
-                onStart={handleStart}
-              />
-            </div>
-          )}
 
         {/* End-heptathlon affordance for the host. Available any time
             after the event is past lobby and before it's finished. */}

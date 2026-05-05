@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
-import { startRound } from "@/components/host/_fetch";
+import { activateEvent } from "@/components/host/_fetch";
 
 export default function LobbyPage() {
   const router = useRouter();
@@ -65,10 +65,11 @@ export default function LobbyPage() {
     setStarting(true);
     setStartError(null);
     try {
-      await startRound(code, {
+      await activateEvent(code, {
         ...(myPlayerId ? { playerId: myPlayerId } : {}),
       });
       // Server flips event.status='active' → bootstrap effect redirects to /play
+      // (the journey view). Host then taps Start on round 1 from there.
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Couldn't start");
       setStarting(false);
