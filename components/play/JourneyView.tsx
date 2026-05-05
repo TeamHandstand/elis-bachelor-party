@@ -13,7 +13,8 @@ import { TeammateOrbit } from "@/components/dashboard/TeammateOrbit";
 import { RoundCard, type RoundCardState } from "./RoundCard";
 import { HostRoundControls } from "./HostRoundControls";
 import { CountdownOverlay } from "./CountdownOverlay";
-import { startRound, endRound } from "@/components/host/_fetch";
+import { startRound, endRound, endEvent } from "@/components/host/_fetch";
+import { EndHeptathlonControls } from "./EndHeptathlonControls";
 import type { ChallengeId } from "@/lib/types";
 
 interface Props {
@@ -195,6 +196,17 @@ export function JourneyView({ code, myPlayerId }: Props) {
     }
   }
 
+  async function handleEndEvent(winnerTeamId: string | null) {
+    try {
+      await endEvent(code, {
+        ...(myPlayerId ? { playerId: myPlayerId } : {}),
+        ...(winnerTeamId ? { winnerTeamId } : {}),
+      });
+    } catch (err) {
+      console.error("[journey] endEvent failed", err);
+    }
+  }
+
   return (
     <>
       {showCountdown &&
@@ -313,6 +325,15 @@ export function JourneyView({ code, myPlayerId }: Props) {
               />
             </div>
           )}
+
+        {/* End-heptathlon affordance for the host. Available any time
+            after the event is past lobby and before it's finished. */}
+        {isHost && event.status === "active" && (
+          <EndHeptathlonControls
+            teams={teamList}
+            onEnd={handleEndEvent}
+          />
+        )}
       </main>
     </>
   );

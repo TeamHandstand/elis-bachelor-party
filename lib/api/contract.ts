@@ -91,6 +91,18 @@ export interface StartEventResponse {
   event: EventConfig;
 }
 
+// ---------- POST /api/events/:code/end ----------
+// Force-end the heptathlon. Optional winnerTeamId crowns a champion;
+// otherwise the event ends with no winner.
+// Auth: host-cookie OR matching host-player.
+export interface EndEventRequest {
+  playerId?: string;
+  winnerTeamId?: string;
+}
+export interface EndEventResponse {
+  event: EventConfig;
+}
+
 // ---------- POST /api/events/:code/reset ----------
 // mode='progress' — clear progress, keep teams. mode='lobby' — clear teams too.
 export interface ResetEventRequest {
