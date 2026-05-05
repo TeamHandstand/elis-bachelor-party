@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
@@ -102,8 +103,18 @@ export default function LobbyPage() {
     return () => clearInterval(interval);
   }, [hydrated, code, myPlayerId]);
 
-  // Redirect to play when active.
+  // Auto-redirect ONLY on the lobby→active or lobby→finished transition,
+  // i.e., the user was watching the lobby and the host kicked things off.
+  // If a returning player navigates back here while the event is already
+  // active, leave them on the lobby with a "rejoin" button so they aren't
+  // trapped in an infinite back-button loop.
+  const sawLobbyRef = useRef(false);
   useEffect(() => {
+    if (event?.status === "lobby") {
+      sawLobbyRef.current = true;
+      return;
+    }
+    if (!sawLobbyRef.current) return;
     if (event?.status === "active") {
       router.replace(`/e/${code}/play`);
     } else if (event?.status === "finished") {
@@ -120,14 +131,31 @@ export default function LobbyPage() {
       <div className="text-center mt-8 mb-6">
         <div className="text-5xl mb-2">🍕</div>
         <div className="font-display text-2xl font-extrabold tracking-wider">
-          {isHost ? "READY WHEN YOU ARE" : "WAITING FOR THE HOST"}
+          {event?.status === "active"
+            ? "EVENT IS LIVE"
+            : isHost
+              ? "READY WHEN YOU ARE"
+              : "WAITING FOR THE HOST"}
         </div>
         <div className="text-xs uppercase tracking-widest opacity-70 mt-1">
           event · {code}
         </div>
       </div>
 
-      {isHost && (
+      {/* Rejoin path for someone who navigated back to the lobby mid-event. */}
+      {event?.status === "active" && (
+        <div className="mb-4">
+          <Link
+            href={`/e/${code}/play`}
+            className="block w-full py-4 rounded-2xl bg-gradient-party text-center font-display text-lg font-extrabold tracking-widest"
+          >
+            JOIN THE ACTION →
+          </Link>
+        </div>
+      )}
+
+      {/* Lobby start button — host only, status still lobby. */}
+      {isHost && event?.status === "lobby" && (
         <div className="mb-4">
           <button
             type="button"
@@ -143,6 +171,16 @@ export default function LobbyPage() {
             </div>
           ) : null}
         </div>
+      )}
+
+      {/* Cookie-hosts (only) get an "events list" back link. */}
+      {isCookieHost && (
+        <Link
+          href="/host"
+          className="self-center text-xs opacity-60 underline mb-4"
+        >
+          ← back to events list
+        </Link>
       )}
 
       {me && (

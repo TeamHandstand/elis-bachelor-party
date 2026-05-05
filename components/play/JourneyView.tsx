@@ -14,6 +14,7 @@ import { RoundCard, type RoundCardState } from "./RoundCard";
 import { HostRoundControls, type EndPickerEntry } from "./HostRoundControls";
 import { CHALLENGES } from "@/lib/challenges";
 import { CountdownOverlay } from "./CountdownOverlay";
+import Link from "next/link";
 import { startRound, endRound, endEvent } from "@/components/host/_fetch";
 import { EndHeptathlonControls } from "./EndHeptathlonControls";
 import type { ChallengeId } from "@/lib/types";
@@ -246,6 +247,30 @@ export function JourneyView({ code, myPlayerId }: Props) {
         <TeamHeader />
         <TeammateOrbit />
 
+        {/* Big red END EVENT affordance — host only, pinned up top so it's
+            always reachable without scrolling. */}
+        {isHost && event.status === "active" && (
+          <div className="mt-2">
+            <EndHeptathlonControls
+              teams={teamList}
+              winsByTeamId={Object.fromEntries(
+                standings.map((s) => [s.team.id, s.wins]),
+              )}
+              onEnd={handleEndEvent}
+            />
+          </div>
+        )}
+
+        {/* Cookie-hosts get a "back to events list" link. */}
+        {isCookieHost && (
+          <Link
+            href="/host"
+            className="self-center text-xs opacity-60 underline mt-2"
+          >
+            ← all events
+          </Link>
+        )}
+
         {/* Round-wins standings */}
         <div className="rounded-2xl bg-bg-card p-3 mt-2">
           <div className="text-[10px] uppercase tracking-widest opacity-60 mb-1 font-bold">
@@ -339,14 +364,6 @@ export function JourneyView({ code, myPlayerId }: Props) {
           })}
         </div>
 
-        {/* End-heptathlon affordance for the host. Available any time
-            after the event is past lobby and before it's finished. */}
-        {isHost && event.status === "active" && (
-          <EndHeptathlonControls
-            teams={teamList}
-            onEnd={handleEndEvent}
-          />
-        )}
       </main>
     </>
   );

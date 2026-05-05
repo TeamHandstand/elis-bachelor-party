@@ -94,7 +94,16 @@ export function playerRowToPlayer(row: PlayerRow): Player {
 // ----- Queries -----
 
 export async function listEvents(): Promise<
-  Array<{ id: string; code: string; title: string; status: EventStatus; createdAt: string }>
+  Array<{
+    id: string;
+    code: string;
+    title: string;
+    status: EventStatus;
+    createdAt: string;
+    currentRoundIndex: number | null;
+    currentRoundStatus: RoundStatus | null;
+    currentRoundStartsAt: number | null;
+  }>
 > {
   const rows = await db
     .select({
@@ -103,6 +112,9 @@ export async function listEvents(): Promise<
       title: events.title,
       status: events.status,
       createdAt: events.createdAt,
+      currentRoundIndex: events.currentRoundIndex,
+      currentRoundStatus: events.currentRoundStatus,
+      currentRoundStartsAt: events.currentRoundStartsAt,
     })
     .from(events)
     .orderBy(sql`${events.createdAt} DESC`);
@@ -112,6 +124,11 @@ export async function listEvents(): Promise<
     title: r.title,
     status: r.status as EventStatus,
     createdAt: r.createdAt.toISOString(),
+    currentRoundIndex: r.currentRoundIndex,
+    currentRoundStatus: (r.currentRoundStatus as RoundStatus | null) ?? null,
+    currentRoundStartsAt: r.currentRoundStartsAt
+      ? r.currentRoundStartsAt.getTime()
+      : null,
   }));
 }
 

@@ -1,8 +1,8 @@
 import { headers } from "next/headers";
-import Link from "next/link";
 import { isHostAuthorized } from "@/lib/auth/host";
 import LoginForm from "@/components/host/LoginForm";
 import NewEventButton from "@/components/host/NewEventButton";
+import HostEventList from "@/components/host/HostEventList";
 import type { ListEventsResponse } from "@/lib/api/contract";
 
 async function fetchEvents(): Promise<ListEventsResponse | null> {
@@ -45,39 +45,7 @@ export default async function HostHomePage() {
           <NewEventButton />
         </div>
 
-        {events.length === 0 ? (
-          <div className="bg-bg-card rounded-xl2 p-8 text-center opacity-70">
-            <div className="text-5xl mb-2">🌭</div>
-            <div className="font-bold mb-1">No events yet</div>
-            <div className="text-sm opacity-80">
-              Hit “New event” to spin one up.
-            </div>
-          </div>
-        ) : (
-          <ul className="space-y-2">
-            {events.map((ev) => (
-              <li key={ev.id}>
-                <Link
-                  href={`/host/${ev.code}`}
-                  className="flex items-center justify-between gap-3 bg-bg-card hover:bg-bg-deep rounded-xl2 p-4 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="font-display text-lg font-bold truncate">
-                      {ev.title || "Untitled event"}
-                    </div>
-                    <div className="text-xs opacity-60">
-                      <span className="font-bold tracking-widest text-accent-orange">
-                        {ev.code}
-                      </span>{" "}
-                      · {new Date(ev.createdAt).toLocaleString()} · {ev.status}
-                    </div>
-                  </div>
-                  <span className="opacity-50">→</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+        <HostEventList initial={events} />
       </div>
     </main>
   );

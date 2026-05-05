@@ -32,6 +32,11 @@ export interface ListEventsResponse {
     title: string;
     status: EventStatus;
     createdAt: string;
+    // Round state — used by the listing UI to render a LIVE/COUNTDOWN
+    // indicator and (for active countdowns) auto-redirect into the event.
+    currentRoundIndex: number | null;
+    currentRoundStatus: "live" | "decided" | null;
+    currentRoundStartsAt: number | null; // ms epoch
   }>;
 }
 
