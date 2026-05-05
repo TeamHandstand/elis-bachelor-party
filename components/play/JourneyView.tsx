@@ -29,7 +29,31 @@ export function JourneyView({ code, myPlayerId }: Props) {
   const standings = useRoundStandings();
   const winnerByRound = useRoundWinnerByIndex();
 
-  const isHost = !!myPlayerId && event?.hostPlayerId === myPlayerId;
+  const isHostPlayer =
+    !!myPlayerId && event?.hostPlayerId === myPlayerId;
+
+  // Cookie-host detection: anyone with a valid host cookie also gets host
+  // controls, even without being the designated host-player. Lets Sam start
+  // the race from the game UI without crowning himself first.
+  const [isCookieHost, setIsCookieHost] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/host/me", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { isHost: boolean };
+        if (!cancelled) setIsCookieHost(!!data.isHost);
+      } catch {
+        /* ignore — non-host */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isHost = isHostPlayer || isCookieHost;
   const teamList = useMemo(() => Object.values(teams), [teams]);
 
   const order = useMemo<ChallengeId[]>(() => {

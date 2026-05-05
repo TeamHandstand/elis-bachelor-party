@@ -17,6 +17,12 @@ export interface HostLoginResponse {
   ok: boolean;
 }
 
+// ---------- GET /api/host/me ----------
+// Boolean: does the calling browser have a valid host cookie?
+export interface HostMeResponse {
+  isHost: boolean;
+}
+
 // ---------- GET /api/host/events ----------
 // Lists events for the host dashboard. Requires host cookie.
 export interface ListEventsResponse {
