@@ -12,7 +12,9 @@ interface Props {
   myPlayerId: string;
 }
 
-const BATCH_SIZE = 10;
+// Smaller batch = teammates' contributions show up faster, at the cost of
+// more PubNub messages. 3 is a good middle ground for a one-off party event.
+const BATCH_SIZE = 3;
 
 export function TapsView({ code, myPlayerId }: Props) {
   const publisher = usePublisher(code);
@@ -22,8 +24,34 @@ export function TapsView({ code, myPlayerId }: Props) {
 
   const padRef = useRef<HTMLDivElement | null>(null);
   const bufferRef = useRef(0);
-  const [localTaps, setLocalTaps] = useState(0);
+  // pendingMine reflects bufferRef in state so React re-renders. We don't
+  // reset it to 0 on flush — instead we let the round-tripped server credit
+  // (`myCredited`) consume it via a watcher effect, which keeps the displayed
+  // total monotonically increasing.
+  const [pendingMine, setPendingMine] = useState(0);
   const [flash, setFlash] = useState(false);
+
+  const def = CHALLENGES.taps;
+  const threshold = event?.challenges.taps.threshold ?? def.defaultThreshold;
+  const teamValue = Math.floor(myProgress?.taps.value ?? 0);
+  const myCredited = Math.floor(
+    (myProgress?.taps.perPlayer?.[myPlayerId] ?? 0) as number,
+  );
+
+  // Decrement pendingMine as the server credits our taps. If teamValue resets
+  // (round restart / progress-reset), wipe pending too.
+  const lastCreditedRef = useRef(0);
+  useEffect(() => {
+    const prev = lastCreditedRef.current;
+    if (myCredited > prev) {
+      const delta = myCredited - prev;
+      setPendingMine((p) => Math.max(0, p - delta));
+      lastCreditedRef.current = myCredited;
+    } else if (myCredited < prev) {
+      setPendingMine(0);
+      lastCreditedRef.current = myCredited;
+    }
+  }, [myCredited]);
 
   useEffect(() => {
     if (!myTeamId || !padRef.current) return;
@@ -38,7 +66,7 @@ export function TapsView({ code, myPlayerId }: Props) {
       if (cancelled) return;
       unsub = await sensor.start(target, () => {
         bufferRef.current += 1;
-        setLocalTaps((n) => n + 1);
+        setPendingMine((p) => p + 1);
         setFlash((f) => !f);
         if (bufferRef.current >= BATCH_SIZE) {
           const flush = bufferRef.current;
@@ -73,9 +101,7 @@ export function TapsView({ code, myPlayerId }: Props) {
     };
   }, [myPlayerId, myTeamId, publisher]);
 
-  const def = CHALLENGES.taps;
-  const threshold = event?.challenges.taps.threshold ?? def.defaultThreshold;
-  const teamValue = Math.floor(myProgress?.taps.value ?? 0);
+  const displayedTeam = teamValue + pendingMine;
 
   return (
     <div
@@ -89,13 +115,13 @@ export function TapsView({ code, myPlayerId }: Props) {
         Tap anywhere on this screen
       </div>
       <div className="font-display text-[7rem] leading-none font-extrabold tabular-nums text-accent-orange drop-shadow">
-        {teamValue.toLocaleString()}
+        {displayedTeam.toLocaleString()}
       </div>
       <div className="text-sm uppercase tracking-widest opacity-70 mt-2">
         of {threshold.toLocaleString()}
       </div>
       <div className="text-xs opacity-50 mt-2">
-        you: {localTaps.toLocaleString()} taps
+        you: {(myCredited + pendingMine).toLocaleString()} taps
       </div>
       <div className="text-5xl mt-8">👆</div>
       <div className="text-xs opacity-60 mt-6 max-w-xs text-center">

@@ -144,3 +144,18 @@ export async function endRound(
     body,
   });
 }
+
+import type {
+  EndEventRequest,
+  EndEventResponse,
+} from "@/lib/api/contract";
+
+export async function endEvent(
+  code: string,
+  body: EndEventRequest = {},
+): Promise<EndEventResponse> {
+  return http<EndEventResponse>(`/api/events/${code}/end`, {
+    method: "POST",
+    body,
+  });
+}

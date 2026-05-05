@@ -84,19 +84,42 @@ export const CHALLENGE_ORDER: ChallengeId[] = [
 ];
 
 export function defaultChallengeConfig(): EventConfig["challenges"] {
-  const out: Record<string, { enabled: boolean; threshold: number }> = {};
-  for (const id of CHALLENGE_ORDER) {
-    out[id] = { enabled: true, threshold: CHALLENGES[id].defaultThreshold };
-  }
+  const out: Record<
+    string,
+    { enabled: boolean; threshold: number; order: number }
+  > = {};
+  CHALLENGE_ORDER.forEach((id, idx) => {
+    out[id] = {
+      enabled: true,
+      threshold: CHALLENGES[id].defaultThreshold,
+      order: idx,
+    };
+  });
   return out as EventConfig["challenges"];
 }
 
 /**
- * Filter CHALLENGE_ORDER down to only the challenges enabled in this event.
- * Used to drive the heptathlon: round N maps to enabledChallengeOrder(event)[N].
+ * Sort all challenges (enabled or not) by the per-event `order` field, with
+ * a stable fallback to CHALLENGE_ORDER for events created before reorder
+ * support landed. Used by the host config UI.
+ */
+export function fullChallengeOrder(
+  challenges: EventConfig["challenges"],
+): ChallengeId[] {
+  const ids = [...CHALLENGE_ORDER];
+  return ids.sort((a, b) => {
+    const oa = challenges[a]?.order ?? CHALLENGE_ORDER.indexOf(a);
+    const ob = challenges[b]?.order ?? CHALLENGE_ORDER.indexOf(b);
+    return oa - ob;
+  });
+}
+
+/**
+ * Filter to only the enabled challenges, sorted by per-event `order`.
+ * Drives the heptathlon: round N maps to enabledChallengeOrder(event)[N].
  */
 export function enabledChallengeOrder(
   challenges: EventConfig["challenges"],
 ): ChallengeId[] {
-  return CHALLENGE_ORDER.filter((id) => challenges[id]?.enabled);
+  return fullChallengeOrder(challenges).filter((id) => challenges[id]?.enabled);
 }

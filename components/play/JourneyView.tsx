@@ -11,9 +11,11 @@ import { enabledChallengeOrder } from "@/lib/challenges";
 import { TeamHeader } from "@/components/dashboard/TeamHeader";
 import { TeammateOrbit } from "@/components/dashboard/TeammateOrbit";
 import { RoundCard, type RoundCardState } from "./RoundCard";
-import { HostRoundControls } from "./HostRoundControls";
+import { HostRoundControls, type EndPickerEntry } from "./HostRoundControls";
+import { CHALLENGES } from "@/lib/challenges";
 import { CountdownOverlay } from "./CountdownOverlay";
-import { startRound, endRound } from "@/components/host/_fetch";
+import { startRound, endRound, endEvent } from "@/components/host/_fetch";
+import { EndHeptathlonControls } from "./EndHeptathlonControls";
 import type { ChallengeId } from "@/lib/types";
 
 interface Props {
@@ -29,8 +31,53 @@ export function JourneyView({ code, myPlayerId }: Props) {
   const standings = useRoundStandings();
   const winnerByRound = useRoundWinnerByIndex();
 
-  const isHost = !!myPlayerId && event?.hostPlayerId === myPlayerId;
+  const isHostPlayer =
+    !!myPlayerId && event?.hostPlayerId === myPlayerId;
+
+  // Cookie-host detection: anyone with a valid host cookie also gets host
+  // controls, even without being the designated host-player. Lets Sam start
+  // the race from the game UI without crowning himself first.
+  const [isCookieHost, setIsCookieHost] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/host/me", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { isHost: boolean };
+        if (!cancelled) setIsCookieHost(!!data.isHost);
+      } catch {
+        /* ignore — non-host */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isHost = isHostPlayer || isCookieHost;
   const teamList = useMemo(() => Object.values(teams), [teams]);
+  const progressMap = useToastyStore((s) => s.progress);
+
+  // Build the rich entry list for the End Round picker — completion times and
+  // current values per team for the active challenge.
+  const endPickerEntries = useMemo<EndPickerEntry[]>(() => {
+    if (!event || event.currentRoundIndex === null) return [];
+    const order = enabledChallengeOrder(event.challenges);
+    const ch = order[event.currentRoundIndex];
+    if (!ch) return [];
+    const def = CHALLENGES[ch];
+    const threshold = event.challenges[ch]?.threshold ?? def.defaultThreshold;
+    return teamList.map((t) => {
+      const cur = progressMap[t.id]?.[ch];
+      return {
+        team: t,
+        completedAt: cur?.completedAt ?? null,
+        value: cur?.value ?? 0,
+        threshold,
+      };
+    });
+  }, [event, teamList, progressMap]);
 
   const order = useMemo<ChallengeId[]>(() => {
     if (!event) return [];
@@ -171,6 +218,17 @@ export function JourneyView({ code, myPlayerId }: Props) {
     }
   }
 
+  async function handleEndEvent(winnerTeamId: string | null) {
+    try {
+      await endEvent(code, {
+        ...(myPlayerId ? { playerId: myPlayerId } : {}),
+        ...(winnerTeamId ? { winnerTeamId } : {}),
+      });
+    } catch (err) {
+      console.error("[journey] endEvent failed", err);
+    }
+  }
+
   return (
     <>
       {showCountdown &&
@@ -229,7 +287,11 @@ export function JourneyView({ code, myPlayerId }: Props) {
               if (card.state.kind === "current-live") {
                 hostControls = (
                   <HostRoundControls
-                    variant={{ kind: "end", teams: teamList }}
+                    variant={{
+                      kind: "end",
+                      entries: endPickerEntries,
+                      challenge: card.challenge,
+                    }}
                     onEnd={handleEnd}
                   />
                 );
@@ -289,6 +351,15 @@ export function JourneyView({ code, myPlayerId }: Props) {
               />
             </div>
           )}
+
+        {/* End-heptathlon affordance for the host. Available any time
+            after the event is past lobby and before it's finished. */}
+        {isHost && event.status === "active" && (
+          <EndHeptathlonControls
+            teams={teamList}
+            onEnd={handleEndEvent}
+          />
+        )}
       </main>
     </>
   );

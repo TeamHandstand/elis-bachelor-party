@@ -1,27 +1,84 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { db, schema } from "@/lib/db/client";
-import { eq } from "drizzle-orm";
-import { isHostAuthorized } from "@/lib/auth/host";
+import { and, eq } from "drizzle-orm";
+import { isHostAuthorized, isHostPlayer } from "@/lib/auth/host";
 import { normalizeEventCode } from "@/lib/utils/code";
 import { publishFromServer } from "@/lib/pubnub/server";
 import { getEventByCode } from "@/lib/db/queries";
 
-export async function POST(_req: Request, { params }: { params: { code: string } }) {
-  if (!(await isHostAuthorized())) {
+const BodySchema = z
+  .object({
+    playerId: z.string().uuid().optional(),
+    winnerTeamId: z.string().uuid().optional(),
+  })
+  .strict();
+
+/**
+ * Force-end the heptathlon. Distinct from /round/end (which decides one round).
+ * If `winnerTeamId` is supplied and belongs to this event, sets it as the
+ * overall champion. Otherwise the event ends with no winner.
+ *
+ * Auth: host-cookie OR matching host-player.
+ */
+export async function POST(
+  req: Request,
+  { params }: { params: { code: string } },
+) {
+  const code = normalizeEventCode(params.code);
+  if (!code) {
+    return NextResponse.json({ error: "invalid event code" }, { status: 400 });
+  }
+
+  let json: unknown = {};
+  try {
+    const text = await req.text();
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  const parsed = BodySchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "invalid request body" }, { status: 400 });
+  }
+
+  const cookieAuthed = await isHostAuthorized();
+  const playerAuthed =
+    !cookieAuthed && (await isHostPlayer(code, parsed.data.playerId));
+  if (!cookieAuthed && !playerAuthed) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const code = normalizeEventCode(params.code);
   const existing = await getEventByCode(code);
   if (!existing) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  // Force-end the event (host-driven, no winner). Different from /finish which
-  // is the atomic claim by a winning team.
+  // If a winner is requested, validate it belongs to this event.
+  let winnerTeamId: string | null = null;
+  if (parsed.data.winnerTeamId) {
+    const matching = existing.teams.find(
+      (t) => t.id === parsed.data.winnerTeamId,
+    );
+    if (!matching) {
+      return NextResponse.json(
+        { error: "winnerTeamId not in this event" },
+        { status: 400 },
+      );
+    }
+    winnerTeamId = matching.id;
+  }
+
   await db
     .update(schema.events)
-    .set({ status: "finished", finishedAt: new Date() })
+    .set({
+      status: "finished",
+      finishedAt: new Date(),
+      winnerTeamId,
+      // Clear any in-flight live round so clients don't keep showing
+      // countdown/decided UI on the finished screen.
+      currentRoundStatus: null,
+    })
     .where(eq(schema.events.code, code));
 
   try {
@@ -29,6 +86,7 @@ export async function POST(_req: Request, { params }: { params: { code: string }
       kind: "event-state",
       status: "finished",
       ts: Date.now(),
+      ...(winnerTeamId ? { winnerTeamId } : {}),
     });
   } catch (err) {
     console.warn("[end] PubNub publish failed", err);

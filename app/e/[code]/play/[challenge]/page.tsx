@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useProgressFlush } from "@/lib/store/flush";
@@ -9,7 +9,6 @@ import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
 import { CHALLENGES, enabledChallengeOrder } from "@/lib/challenges";
 import { useStandings } from "@/lib/store/selectors";
-import { endRound } from "@/components/host/_fetch";
 import type { ChallengeId } from "@/lib/types";
 import { CountdownOverlay } from "@/components/play/CountdownOverlay";
 import { DistanceView } from "@/components/challenge/DistanceView";
@@ -38,7 +37,6 @@ export default function ChallengePage() {
 
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
-  const autoEndedRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined" || !code) return;
@@ -117,30 +115,9 @@ export default function ChallengePage() {
     }
   }, [event?.currentRoundStatus, router, code, event]);
 
-  // Auto-end detection: if my team has just completed the threshold for
-  // this challenge, POST /round/end (mode=auto). Server validates and
-  // first-write-wins.
-  useEffect(() => {
-    if (!event || !myTeamId || autoEndedRef.current) return;
-    if (event.currentRoundStatus !== "live") return;
-    const cur = myProgress?.[challenge];
-    if (!cur?.completed) return;
-    autoEndedRef.current = true;
-    (async () => {
-      try {
-        await endRound(code, { mode: "auto", teamId: myTeamId });
-      } catch (err) {
-        console.error("[challenge] auto endRound failed", err);
-      }
-    })();
-  }, [
-    event?.currentRoundStatus,
-    myProgress,
-    challenge,
-    myTeamId,
-    code,
-    event,
-  ]);
+  // No auto-end: every team gets a chance to keep going even after one
+  // finishes. The host explicitly ends the round; the server prefers the
+  // first-completed team in its recommended winner.
 
   if (!hydrated || !myPlayerId) {
     return (
@@ -241,6 +218,7 @@ export default function ChallengePage() {
             const isMine = row.team.id === myTeamId;
             const tp = progressMap[row.team.id];
             const cur = tp?.[challenge];
+            const isDone = !!cur?.completed;
             const valueStr = cur
               ? def.formatProgress(cur.value, threshold)
               : def.formatProgress(0, threshold);
@@ -251,13 +229,21 @@ export default function ChallengePage() {
                   isMine
                     ? "bg-accent-orange/20 text-accent-orange font-extrabold"
                     : "bg-bg-card opacity-80"
-                }`}
+                } ${isDone ? "ring-1 ring-accent-green/60" : ""}`}
               >
-                {row.team.emoji} {valueStr}
+                {row.team.emoji} {isDone ? "✅ " : ""}
+                {valueStr}
               </div>
             );
           })}
         </div>
+        {/* Team-finished banner — round still open; just signals to wait. */}
+        {myCur?.completed && (
+          <div className="px-3 py-3 bg-gradient-done text-center font-display font-extrabold tracking-widest text-sm">
+            ✅ YOUR TEAM FINISHED — keep going if you want, host will end the
+            round.
+          </div>
+        )}
         {view}
       </main>
     </>

@@ -17,6 +17,12 @@ export interface HostLoginResponse {
   ok: boolean;
 }
 
+// ---------- GET /api/host/me ----------
+// Boolean: does the calling browser have a valid host cookie?
+export interface HostMeResponse {
+  isHost: boolean;
+}
+
 // ---------- GET /api/host/events ----------
 // Lists events for the host dashboard. Requires host cookie.
 export interface ListEventsResponse {
@@ -82,6 +88,18 @@ export interface AssignPlayerResponse {
 
 // ---------- POST /api/events/:code/start ----------
 export interface StartEventResponse {
+  event: EventConfig;
+}
+
+// ---------- POST /api/events/:code/end ----------
+// Force-end the heptathlon. Optional winnerTeamId crowns a champion;
+// otherwise the event ends with no winner.
+// Auth: host-cookie OR matching host-player.
+export interface EndEventRequest {
+  playerId?: string;
+  winnerTeamId?: string;
+}
+export interface EndEventResponse {
   event: EventConfig;
 }
 

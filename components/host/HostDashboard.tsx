@@ -166,7 +166,7 @@ function StickyHeader({
         <div className="flex flex-wrap gap-2 items-start">
           <StartButton event={event} players={players} onStarted={onEvent} />
           <ResetButtons event={event} onReset={onReset} />
-          <EndButton event={event} onEnded={onEvent} />
+          <EndButton event={event} teams={teams} onEnded={onEvent} />
         </div>
       </div>
     </header>

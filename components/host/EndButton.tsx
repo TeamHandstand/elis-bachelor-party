@@ -1,73 +1,87 @@
 "use client";
 import { useState } from "react";
-import type { EventConfig } from "@/lib/types";
-import { patchEvent } from "./_fetch";
+import type { EventConfig, Team } from "@/lib/types";
+import { endEvent } from "./_fetch";
 
 interface Props {
   event: EventConfig;
+  teams: Team[];
   onEnded: (event: EventConfig) => void;
 }
 
-// "End event" forces status to 'finished' via the generic PATCH endpoint.
-// Server is responsible for accepting status transitions; if it rejects this
-// route we surface the error.
-export default function EndButton({ event, onEnded }: Props) {
+export default function EndButton({ event, teams, onEnded }: Props) {
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (event.status === "finished") return null;
 
-  async function onClick() {
+  async function endWith(winnerTeamId: string | null) {
     if (busy) return;
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm("End the event now? Players will see the final results screen.")
-    ) {
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
-      // Pass status via UpdateEventRequest "challenges" cast — but contract
-      // doesn't expose status directly. We use a separate /finish-style call
-      // by posting to the same PATCH and including a sentinel field. If your
-      // API doesn't support this, swap to its dedicated endpoint.
-      // Fallback: rely on /api/events/:code/reset with mode='lobby' isn't right
-      // either. Use a direct fetch to a conventional endpoint.
-      const res = await fetch(`/api/events/${event.code}/end`, {
-        method: "POST",
+      const res = await endEvent(event.code, {
+        ...(winnerTeamId ? { winnerTeamId } : {}),
       });
-      if (!res.ok) {
-        // If server hasn't implemented /end, fall back to PATCH-no-op so we
-        // don't crash; record an error.
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `${res.status} ${res.statusText}`);
-      }
-      const data = (await res.json()) as { event: EventConfig };
-      onEnded(data.event);
+      onEnded(res.event);
+      setPicking(false);
     } catch (err) {
-      // Last-ditch: force a refetch via PATCH with empty body so the parent
-      // re-syncs.
-      try {
-        const res = await patchEvent(event.code, {});
-        onEnded(res.event);
-      } catch {
-        setError(err instanceof Error ? err.message : "End failed.");
-      }
+      setError(err instanceof Error ? err.message : "End failed.");
     } finally {
       setBusy(false);
     }
   }
 
+  if (!picking) {
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <button
+          onClick={() => setPicking(true)}
+          disabled={busy}
+          className="rounded-xl px-3 py-2 bg-bg-deep border border-accent-pink/40 text-accent-pink text-sm font-bold disabled:opacity-50"
+        >
+          🛑 End event…
+        </button>
+        {error ? <span className="text-xs text-accent-pink">{error}</span> : null}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col items-end gap-1">
-      <button
-        onClick={onClick}
-        disabled={busy}
-        className="rounded-xl px-3 py-2 bg-bg-deep border border-accent-pink/40 text-accent-pink text-sm font-bold disabled:opacity-50"
-      >
-        {busy ? "Ending…" : "🛑 End event"}
-      </button>
+    <div className="rounded-xl bg-bg-card border border-accent-pink/40 p-3 w-full max-w-xs">
+      <div className="text-[10px] uppercase tracking-widest opacity-70 mb-2 font-bold text-accent-pink">
+        crown a champion
+      </div>
+      <div className="flex flex-col gap-2">
+        {teams.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            disabled={busy}
+            onClick={() => endWith(t.id)}
+            className="w-full text-left px-3 py-2 rounded-lg bg-gradient-done font-bold text-sm disabled:opacity-50"
+          >
+            🏆 {t.emoji} {t.name}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => endWith(null)}
+          className="w-full px-3 py-2 rounded-lg bg-bg-deep border border-white/10 text-xs font-bold opacity-80 disabled:opacity-50"
+        >
+          end with no winner
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setPicking(false)}
+          className="text-[11px] opacity-50 underline"
+        >
+          cancel
+        </button>
+      </div>
       {error ? <span className="text-xs text-accent-pink">{error}</span> : null}
     </div>
   );

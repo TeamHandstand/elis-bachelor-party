@@ -143,7 +143,10 @@ export interface EventConfig {
   title: string;
   groomName: string;
   status: EventStatus;
-  challenges: Record<ChallengeId, { enabled: boolean; threshold: number }>;
+  challenges: Record<
+    ChallengeId,
+    { enabled: boolean; threshold: number; order?: number }
+  >;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;

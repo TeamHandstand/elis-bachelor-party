@@ -808,26 +808,27 @@ export async function endRound(input: {
         .where(eq(teams.eventId, eventRow.id));
       if (teamRows.length === 0) return { error: "no-teams" };
 
-      if (challenge === "north") {
-        // No per-guess data on server; fall back to first completed row,
-        // else first team.
-        const completed = fpRows.filter(
-          (r) => r.challenge === challenge && r.completed,
-        );
-        winnerTeamId = completed[0]?.teamId ?? teamRows[0].id;
-      } else if (challenge === "scream" || challenge === "shake") {
-        // First completed wins; fallback to first team.
-        const completed = fpRows.filter(
-          (r) => r.challenge === challenge && r.completed,
-        );
-        completed.sort((a, b) => {
+      // Universal rule: if any team has finished the challenge, the earliest
+      // finisher wins. Auto-end is no longer triggered by clients, so multiple
+      // teams may have finished by the time the host clicks End Round — pick
+      // the one who got there first.
+      const completedRows = fpRows
+        .filter((r) => r.challenge === challenge && r.completed)
+        .sort((a, b) => {
           const at = a.completedAt?.getTime() ?? Infinity;
           const bt = b.completedAt?.getTime() ?? Infinity;
           return at - bt;
         });
-        winnerTeamId = completed[0]?.teamId ?? teamRows[0].id;
-      } else {
-        // Accumulators (distance/steps/taps/spin): highest value wins.
+
+      if (completedRows.length > 0) {
+        winnerTeamId = completedRows[0].teamId;
+      } else if (
+        challenge === "distance" ||
+        challenge === "steps" ||
+        challenge === "taps" ||
+        challenge === "spin"
+      ) {
+        // Accumulators: no team finished — highest progress wins.
         const challengeRows = fpRows.filter((r) => r.challenge === challenge);
         let best: { teamId: string; value: number } | null = null;
         for (const r of challengeRows) {
@@ -835,6 +836,10 @@ export async function endRound(input: {
           if (!best || v > best.value) best = { teamId: r.teamId, value: v };
         }
         winnerTeamId = best?.teamId ?? teamRows[0].id;
+      } else {
+        // scream/shake/north with no completed team — host should normally
+        // pick manually; fall back to first team to avoid a 500.
+        winnerTeamId = teamRows[0].id;
       }
     }
   }
