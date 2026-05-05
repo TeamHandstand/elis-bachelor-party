@@ -11,7 +11,8 @@ import { enabledChallengeOrder } from "@/lib/challenges";
 import { TeamHeader } from "@/components/dashboard/TeamHeader";
 import { TeammateOrbit } from "@/components/dashboard/TeammateOrbit";
 import { RoundCard, type RoundCardState } from "./RoundCard";
-import { HostRoundControls } from "./HostRoundControls";
+import { HostRoundControls, type EndPickerEntry } from "./HostRoundControls";
+import { CHALLENGES } from "@/lib/challenges";
 import { CountdownOverlay } from "./CountdownOverlay";
 import { startRound, endRound, endEvent } from "@/components/host/_fetch";
 import { EndHeptathlonControls } from "./EndHeptathlonControls";
@@ -56,6 +57,27 @@ export function JourneyView({ code, myPlayerId }: Props) {
 
   const isHost = isHostPlayer || isCookieHost;
   const teamList = useMemo(() => Object.values(teams), [teams]);
+  const progressMap = useToastyStore((s) => s.progress);
+
+  // Build the rich entry list for the End Round picker — completion times and
+  // current values per team for the active challenge.
+  const endPickerEntries = useMemo<EndPickerEntry[]>(() => {
+    if (!event || event.currentRoundIndex === null) return [];
+    const order = enabledChallengeOrder(event.challenges);
+    const ch = order[event.currentRoundIndex];
+    if (!ch) return [];
+    const def = CHALLENGES[ch];
+    const threshold = event.challenges[ch]?.threshold ?? def.defaultThreshold;
+    return teamList.map((t) => {
+      const cur = progressMap[t.id]?.[ch];
+      return {
+        team: t,
+        completedAt: cur?.completedAt ?? null,
+        value: cur?.value ?? 0,
+        threshold,
+      };
+    });
+  }, [event, teamList, progressMap]);
 
   const order = useMemo<ChallengeId[]>(() => {
     if (!event) return [];
@@ -265,7 +287,11 @@ export function JourneyView({ code, myPlayerId }: Props) {
               if (card.state.kind === "current-live") {
                 hostControls = (
                   <HostRoundControls
-                    variant={{ kind: "end", teams: teamList }}
+                    variant={{
+                      kind: "end",
+                      entries: endPickerEntries,
+                      challenge: card.challenge,
+                    }}
                     onEnd={handleEnd}
                   />
                 );

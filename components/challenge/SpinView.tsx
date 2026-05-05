@@ -12,27 +12,49 @@ interface Props {
   myPlayerId: string;
 }
 
-const PUBLISH_INTERVAL_MS = 400;
+const PUBLISH_INTERVAL_MS = 250;
 const FULL_ROTATION = 360;
+// Publish whenever we've accumulated this many degrees, OR every interval if
+// any motion has been seen. Smaller threshold = more responsive teamwise.
+const PUBLISH_DEGREES = 15;
 
 export function SpinView({ code, myPlayerId }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
+  const event = useToastyStore((s) => s.event);
 
   const [permError, setPermError] = useState(false);
   const [leftDown, setLeftDown] = useState(false);
   const [rightDown, setRightDown] = useState(false);
-  const [degrees, setDegrees] = useState(0);
 
   const sensorRef = useRef<RotationCounter | null>(null);
-  const bufferRef = useRef(0);
+  // Accumulated DEGREES not yet published.
+  const bufferDegRef = useRef(0);
+  // Mirror in state for instant display feedback.
+  const [pendingRot, setPendingRot] = useState(0);
   const lastPublishRef = useRef(0);
 
-  // My contribution (degrees) so far for spin
   const def = CHALLENGES.spin;
-  const myValueDeg = (myProgress?.spin.perPlayer?.[myPlayerId] ?? 0) as number;
-  const myRotations = Math.floor(myValueDeg / FULL_ROTATION);
+  const threshold = event?.challenges.spin.threshold ?? def.defaultThreshold;
+  // Per heptathlon refactor, value & threshold are in ROTATIONS (team-total).
+  // Sensor produces degrees; we convert at publish time.
+  const teamRotations = (myProgress?.spin.value ?? 0) as number;
+  const myRotations = (myProgress?.spin.perPlayer?.[myPlayerId] ?? 0) as number;
+
+  // Decrement pendingRot as the server credits our rotations.
+  const lastCreditedRef = useRef(0);
+  useEffect(() => {
+    const prev = lastCreditedRef.current;
+    if (myRotations > prev) {
+      const delta = myRotations - prev;
+      setPendingRot((p) => Math.max(0, p - delta));
+      lastCreditedRef.current = myRotations;
+    } else if (myRotations < prev) {
+      setPendingRot(0);
+      lastCreditedRef.current = myRotations;
+    }
+  }, [myRotations]);
 
   useEffect(() => {
     if (!myTeamId) return;
@@ -49,24 +71,24 @@ export function SpinView({ code, myPlayerId }: Props) {
         return;
       }
       if (cancelled) return;
-      unsub = await sensor.start((delta) => {
-        bufferRef.current += delta;
-        setDegrees((d) => d + delta);
+      unsub = await sensor.start((deltaDeg) => {
+        bufferDegRef.current += deltaDeg;
+        setPendingRot((p) => p + deltaDeg / FULL_ROTATION);
         const now = Date.now();
-        // Only publish when delta accumulates to ≥ ~30° or every PUBLISH_INTERVAL_MS
         if (
-          bufferRef.current >= 30 ||
-          (bufferRef.current > 0 && now - lastPublishRef.current >= PUBLISH_INTERVAL_MS)
+          bufferDegRef.current >= PUBLISH_DEGREES ||
+          (bufferDegRef.current > 0 &&
+            now - lastPublishRef.current >= PUBLISH_INTERVAL_MS)
         ) {
-          const flush = bufferRef.current;
-          bufferRef.current = 0;
+          const flushDeg = bufferDegRef.current;
+          bufferDegRef.current = 0;
           lastPublishRef.current = now;
           publisher({
             kind: "progress",
             playerId: myPlayerId,
             teamId: myTeamId,
             challenge: "spin",
-            delta: flush,
+            delta: flushDeg / FULL_ROTATION,
             ts: now,
           }).catch(() => {});
         }
@@ -76,15 +98,15 @@ export function SpinView({ code, myPlayerId }: Props) {
     return () => {
       cancelled = true;
       sensorRef.current = null;
-      if (bufferRef.current > 0 && myTeamId) {
-        const remainder = bufferRef.current;
-        bufferRef.current = 0;
+      if (bufferDegRef.current > 0 && myTeamId) {
+        const remainder = bufferDegRef.current;
+        bufferDegRef.current = 0;
         publisher({
           kind: "progress",
           playerId: myPlayerId,
           teamId: myTeamId,
           challenge: "spin",
-          delta: remainder,
+          delta: remainder / FULL_ROTATION,
           ts: Date.now(),
         }).catch(() => {});
       }
@@ -104,8 +126,13 @@ export function SpinView({ code, myPlayerId }: Props) {
   }, [leftDown, rightDown]);
 
   const both = leftDown && rightDown;
-  const goalRotations = 10; // per-player goal
-  const myRotProgress = Math.min(100, Math.floor((myValueDeg / (goalRotations * FULL_ROTATION)) * 100));
+  const displayedTeam = teamRotations + pendingRot;
+  const displayedTeamFloor = Math.floor(displayedTeam);
+  const teamPct = Math.min(
+    100,
+    threshold > 0 ? (displayedTeam / threshold) * 100 : 0,
+  );
+  const myDisplayed = Math.floor(myRotations + pendingRot);
 
   return (
     <div className="flex flex-col flex-1 p-4 relative">
@@ -119,20 +146,20 @@ export function SpinView({ code, myPlayerId }: Props) {
       </div>
 
       <div className="flex flex-col items-center justify-center flex-1">
-        <div className="font-display text-7xl font-extrabold tabular-nums">
-          {myRotations}
+        <div className="font-display text-[7rem] leading-none font-extrabold tabular-nums text-accent-orange drop-shadow">
+          {displayedTeamFloor.toLocaleString()}
         </div>
-        <div className="text-sm uppercase tracking-widest opacity-70">
-          / {goalRotations} rotations
+        <div className="text-sm uppercase tracking-widest opacity-70 mt-2">
+          of {threshold.toLocaleString()} rotations
         </div>
         <div className="w-48 h-2 bg-bg-card rounded-full mt-3 overflow-hidden">
           <div
             className="h-full bg-gradient-party transition-all"
-            style={{ width: `${myRotProgress}%` }}
+            style={{ width: `${teamPct}%` }}
           />
         </div>
-        <div className="text-[10px] opacity-60 mt-2 tabular-nums">
-          {Math.floor(myValueDeg)}° / {goalRotations * FULL_ROTATION}°
+        <div className="text-xs opacity-50 mt-2">
+          you: {myDisplayed.toLocaleString()} rotations
         </div>
       </div>
 
@@ -164,10 +191,6 @@ export function SpinView({ code, myPlayerId }: Props) {
           Compass denied. iOS — refresh & accept.
         </div>
       )}
-
-      <div className="text-[10px] opacity-50 text-center pb-2">
-        live: {Math.floor(degrees)}° this session
-      </div>
     </div>
   );
 }
