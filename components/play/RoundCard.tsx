@@ -75,17 +75,21 @@ export function RoundCard({
       break;
   }
 
+  const isLocked = state.kind === "future";
+
   const inner = (
     <div className="flex items-center gap-3">
       <div className="font-display font-extrabold text-2xl opacity-70 w-7 text-center tabular-nums">
         {glyph}
       </div>
-      <div className="text-3xl">{def.emoji}</div>
+      <div className="text-3xl">{isLocked ? "❓" : def.emoji}</div>
       <div className="flex-1 min-w-0">
         <div className="font-display font-extrabold tracking-wider uppercase text-sm truncate">
-          {def.label}
+          {isLocked ? `Round ${ordinal} · ???` : def.label}
         </div>
-        <div className="text-[11px] opacity-60 truncate">{def.description}</div>
+        {!isLocked && (
+          <div className="text-[11px] opacity-60 truncate">{def.description}</div>
+        )}
       </div>
       {trailing}
     </div>
