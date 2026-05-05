@@ -114,6 +114,21 @@ export interface HostChangedMsg {
   ts: number;
 }
 
+export interface PlayerRenamedMsg {
+  kind: "player-renamed";
+  playerId: string;
+  name: string;
+  ts: number;
+}
+
+export interface TeamRenamedMsg {
+  kind: "team-renamed";
+  teamId: string;
+  name: string;
+  emoji: string;
+  ts: number;
+}
+
 export type ProgressMsg =
   | ProgressDeltaMsg
   | LiveLevelMsg
@@ -125,7 +140,9 @@ export type ProgressMsg =
   | ProgressResetMsg
   | RoundStartMsg
   | RoundEndMsg
-  | HostChangedMsg;
+  | HostChangedMsg
+  | PlayerRenamedMsg
+  | TeamRenamedMsg;
 
 // ----- Domain entities (mirror DB rows; serializable for client use) -----
 

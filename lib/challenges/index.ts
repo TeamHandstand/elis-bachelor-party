@@ -65,11 +65,12 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
     id: "north",
     label: "Due North",
     emoji: "🧭",
-    defaultThreshold: 3, // number of guesses
+    defaultThreshold: 3, // expected guesses (one per teammate, default 3)
     unit: "guesses",
     aggregation: "per-player-once",
-    description: "Each teammate guesses true north. Smaller angular error = better. Used as tiebreaker.",
-    formatProgress: (v, t) => `${Math.floor(v)} / ${t} guesses`,
+    description:
+      "Every teammate gets one shot at guessing true north. The team's score is the average angular error — smallest avg wins.",
+    formatProgress: (v, t) => `${Math.floor(v)} / ${t} guesses in`,
   },
 };
 
@@ -100,7 +101,7 @@ export function challengeCommand(id: ChallengeId, threshold: number): string {
     case "spin":
       return `Spin in place — rack up ${threshold.toLocaleString()} rotations as a team!`;
     case "north":
-      return `Each teammate gets one shot — guess true north!`;
+      return `Each teammate gets one guess at true north — smallest team avg-error wins!`;
   }
 }
 

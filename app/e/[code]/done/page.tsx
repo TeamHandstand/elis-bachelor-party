@@ -111,12 +111,6 @@ export default function DonePage() {
       <div className="mt-auto flex flex-col items-center gap-3 pb-4">
         <Link
           href={`/e/${code}/play`}
-          className="text-xs opacity-60 underline"
-        >
-          back to journey
-        </Link>
-        <Link
-          href="/"
           className="px-6 py-3 rounded-2xl bg-gradient-party font-extrabold text-sm tracking-widest"
         >
           HOME

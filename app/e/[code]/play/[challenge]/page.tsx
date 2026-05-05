@@ -92,15 +92,17 @@ export default function ChallengePage() {
   const isHostPlayer =
     !!myPlayerId && event?.hostPlayerId === myPlayerId;
   const { isHost: isCookieHost } = useCookieHost();
-  const isHost = isHostPlayer || isCookieHost;
+  const isHost =
+    isHostPlayer || (!event?.hostPlayerId && isCookieHost);
 
   const isValid = useMemo(() => VALID_IDS.includes(challenge), [challenge]);
   const def = isValid ? CHALLENGES[challenge] : null;
 
-  // Lobby/finished bounce.
+  // Lobby bounce. (Finished events stay on this view long enough to render
+  // the final round results — players go back to journey via the back arrow.)
   useEffect(() => {
     if (event?.status === "lobby") router.replace(`/e/${code}/lobby`);
-    if (event?.status === "finished") router.replace(`/e/${code}/done`);
+    if (event?.status === "finished") router.replace(`/e/${code}/play`);
   }, [event?.status, code, router]);
 
   // If this challenge isn't the current round, bounce back to journey.
@@ -145,9 +147,26 @@ export default function ChallengePage() {
     );
     if (!allDone) return;
     autoEndedRef.current = challenge;
+
+    // For north, smallest avg angular error wins. Server doesn't have the
+    // per-player guess data — pick the winner client-side and pass it along.
+    let chosenTeamId: string | undefined;
+    if (challenge === "north") {
+      let best: { teamId: string; avg: number } | null = null;
+      for (const t of allTeamsList) {
+        const guesses = progressMap[t.id]?.north?.guesses ?? [];
+        if (guesses.length === 0) continue;
+        const avg =
+          guesses.reduce((s, g) => s + g.errorDeg, 0) / guesses.length;
+        if (!best || avg < best.avg) best = { teamId: t.id, avg };
+      }
+      chosenTeamId = best?.teamId;
+    }
+
     endRound(code, {
       mode: "host",
       ...(myPlayerId ? { playerId: myPlayerId } : {}),
+      ...(chosenTeamId ? { teamId: chosenTeamId } : {}),
     }).catch((err) => {
       console.error("[challenge] auto endRound failed", err);
       autoEndedRef.current = null;
@@ -276,6 +295,7 @@ export default function ChallengePage() {
         value: tp?.value ?? 0,
         threshold,
         players: playersByTeam[t.id] ?? [],
+        guesses: tp?.guesses ?? [],
       };
     },
   );

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { listEvents } from "./_fetch";
+import { deleteEvent, listEvents } from "./_fetch";
 import type { ListEventsResponse } from "@/lib/api/contract";
 
 interface Props {
@@ -13,42 +13,27 @@ interface Props {
 const POLL_INTERVAL_MS = 4000;
 
 /**
- * Client-side wrapper around the events list that:
- *  - polls /api/host/events every few seconds so LIVE / countdown markers
- *    stay fresh without a hard refresh
- *  - if any event is currently in countdown (status='live' AND startsAt is
- *    still in the future), redirects the host into that event's journey
- *    so they never miss the kickoff.
+ * Client-side wrapper around the events list that polls /api/host/events
+ * every few seconds so LIVE / countdown markers stay fresh without a hard
+ * refresh.
+ *
+ * Tapping a row always opens the host-mode editor (/host/[code]). To open the
+ * player view, hit the "↗ Open" button which launches it in a new tab.
  */
 export default function HostEventList({ initial }: Props) {
   const router = useRouter();
   const [events, setEvents] = useState(initial);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let redirected = false;
 
     async function poll() {
       try {
         const data = await listEvents();
         if (cancelled) return;
         setEvents(data.events);
-
-        // Auto-redirect once if any event is mid-countdown.
-        if (!redirected) {
-          const now = Date.now();
-          const countdown = data.events.find(
-            (e) =>
-              e.status === "active" &&
-              e.currentRoundStatus === "live" &&
-              e.currentRoundStartsAt !== null &&
-              e.currentRoundStartsAt > now,
-          );
-          if (countdown) {
-            redirected = true;
-            router.push(`/e/${countdown.code}/play`);
-          }
-        }
       } catch {
         /* ignore — try again next tick */
       }
@@ -61,6 +46,28 @@ export default function HostEventList({ initial }: Props) {
       clearInterval(interval);
     };
   }, [router]);
+
+  async function handleDelete(ev: ListEventsResponse["events"][number]) {
+    const label = ev.title || ev.code;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Delete "${label}"? This wipes all teams, players, and progress for this event. This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusyId(ev.id);
+    setError(null);
+    try {
+      await deleteEvent(ev.code);
+      setEvents((prev) => prev.filter((e) => e.id !== ev.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete event");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   if (events.length === 0) {
     return (
@@ -77,78 +84,94 @@ export default function HostEventList({ initial }: Props) {
   const now = Date.now();
 
   return (
-    <ul className="space-y-2">
-      {events.map((ev) => {
-        const isLive = ev.status === "active";
-        const inCountdown =
-          isLive &&
-          ev.currentRoundStatus === "live" &&
-          ev.currentRoundStartsAt !== null &&
-          ev.currentRoundStartsAt > now;
-        const inRound =
-          isLive &&
-          ev.currentRoundStatus === "live" &&
-          ev.currentRoundStartsAt !== null &&
-          ev.currentRoundStartsAt <= now;
+    <div className="space-y-3">
+      {error ? (
+        <div className="rounded-xl bg-accent-pink/15 border border-accent-pink/40 px-3 py-2 text-xs text-accent-pink">
+          {error}
+        </div>
+      ) : null}
+      <ul className="space-y-2">
+        {events.map((ev) => {
+          const isLive = ev.status === "active";
+          const inCountdown =
+            isLive &&
+            ev.currentRoundStatus === "live" &&
+            ev.currentRoundStartsAt !== null &&
+            ev.currentRoundStartsAt > now;
+          const inRound =
+            isLive &&
+            ev.currentRoundStatus === "live" &&
+            ev.currentRoundStartsAt !== null &&
+            ev.currentRoundStartsAt <= now;
 
-        return (
-          <li key={ev.id}>
-            <Link
-              href={isLive ? `/e/${ev.code}/play` : `/host/${ev.code}`}
-              className={`flex items-center justify-between gap-3 rounded-xl2 p-4 transition-colors ${
+          const isBusy = busyId === ev.id;
+
+          return (
+            <li
+              key={ev.id}
+              className={`rounded-xl2 p-3 transition-colors ${
                 isLive
                   ? "bg-bg-card ring-2 ring-accent-pink/60"
-                  : "bg-bg-card hover:bg-bg-deep"
-              }`}
+                  : "bg-bg-card"
+              } ${isBusy ? "opacity-50" : ""}`}
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-display text-lg font-bold truncate">
-                    {ev.title || "Untitled event"}
-                  </span>
-                  {inCountdown ? (
-                    <span className="px-2 py-0.5 rounded-full bg-accent-orange text-bg text-[10px] uppercase tracking-widest font-extrabold animate-pulse">
-                      ⏱ COUNTDOWN
-                    </span>
-                  ) : inRound ? (
-                    <span className="px-2 py-0.5 rounded-full bg-accent-pink text-white text-[10px] uppercase tracking-widest font-extrabold animate-pulse">
-                      ● LIVE
-                    </span>
-                  ) : isLive ? (
-                    <span className="px-2 py-0.5 rounded-full bg-accent-green text-bg text-[10px] uppercase tracking-widest font-extrabold">
-                      ACTIVE
-                    </span>
-                  ) : null}
-                </div>
-                <div className="text-xs opacity-60 mt-1">
-                  <span className="font-bold tracking-widest text-accent-orange">
-                    {ev.code}
-                  </span>{" "}
-                  · {new Date(ev.createdAt).toLocaleString()} · {ev.status}
-                </div>
-              </div>
-              <span className="opacity-50 flex flex-col items-end gap-0.5">
-                {isLive ? (
-                  <span className="text-[10px] uppercase tracking-widest opacity-60">
-                    join →
-                  </span>
-                ) : null}
-                <span className="text-lg">→</span>
-              </span>
-            </Link>
-            {isLive && (
-              <div className="mt-1 ml-2">
+              <div className="flex items-start gap-3">
                 <Link
                   href={`/host/${ev.code}`}
-                  className="text-[11px] opacity-50 underline hover:opacity-80"
+                  className="flex-1 min-w-0 hover:opacity-90"
+                  aria-label={`Edit ${ev.title || ev.code} as host`}
                 >
-                  manage event →
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-display text-lg font-bold truncate">
+                      {ev.title || "Untitled event"}
+                    </span>
+                    {inCountdown ? (
+                      <span className="px-2 py-0.5 rounded-full bg-accent-orange text-bg text-[10px] uppercase tracking-widest font-extrabold animate-pulse">
+                        ⏱ COUNTDOWN
+                      </span>
+                    ) : inRound ? (
+                      <span className="px-2 py-0.5 rounded-full bg-accent-pink text-white text-[10px] uppercase tracking-widest font-extrabold animate-pulse">
+                        ● LIVE
+                      </span>
+                    ) : isLive ? (
+                      <span className="px-2 py-0.5 rounded-full bg-accent-green text-bg text-[10px] uppercase tracking-widest font-extrabold">
+                        ACTIVE
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-xs opacity-60 mt-1">
+                    <span className="font-bold tracking-widest text-accent-orange">
+                      {ev.code}
+                    </span>{" "}
+                    · {new Date(ev.createdAt).toLocaleString()} · {ev.status}
+                  </div>
                 </Link>
+                <span className="text-lg opacity-50 self-center">→</span>
               </div>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+
+              <div className="mt-3 flex flex-wrap gap-2 items-center">
+                <a
+                  href={`/e/${ev.code}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl bg-bg-deep border border-white/10 text-xs font-bold hover:border-accent-orange/60"
+                >
+                  ↗ Open game in new tab
+                </a>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => handleDelete(ev)}
+                  className="ml-auto px-3 py-1.5 rounded-xl bg-bg-deep border border-accent-pink/40 text-xs font-bold text-accent-pink hover:bg-accent-pink/10 disabled:opacity-50"
+                  aria-label={`Delete ${ev.title || ev.code}`}
+                >
+                  {isBusy ? "deleting…" : "🗑 Delete"}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

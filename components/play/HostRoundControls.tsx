@@ -10,6 +10,8 @@ export interface EndPickerEntry {
   value: number;
   threshold: number;
   players?: Player[]; // teammates on this team — shown in the picker
+  // For 'north': individual angular errors so the picker can rank by avg.
+  guesses?: Array<{ playerId: string; errorDeg: number }>;
 }
 
 type Variant =
@@ -52,10 +54,24 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
     }
   }
 
-  // Sort entries: completed first by earliest completedAt, then non-completed
-  // by value desc. Memoized so stable across renders inside the picker.
+  // Sort entries: north uses smallest-avg-error, others use earliest completion.
   const sortedEntries = useMemo(() => {
     if (variant.kind !== "end") return [] as EndPickerEntry[];
+    if (variant.challenge === "north") {
+      return [...variant.entries].sort((a, b) => {
+        const ag = a.guesses?.length ?? 0;
+        const bg = b.guesses?.length ?? 0;
+        if ((ag > 0) !== (bg > 0)) return ag > 0 ? -1 : 1;
+        if (ag === 0 && bg === 0) return 0;
+        const aAvg =
+          (a.guesses ?? []).reduce((s, g) => s + g.errorDeg, 0) /
+          Math.max(1, ag);
+        const bAvg =
+          (b.guesses ?? []).reduce((s, g) => s + g.errorDeg, 0) /
+          Math.max(1, bg);
+        return aAvg - bAvg;
+      });
+    }
     return [...variant.entries].sort((a, b) => {
       const aDone = a.completedAt !== null;
       const bDone = b.completedAt !== null;
@@ -111,19 +127,34 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
 
     async function confirm() {
       if (!pending || busy) return;
-      const winnerId = pending.kind === "team" ? pending.teamId : null;
+      let winnerId: string | null = null;
+      if (pending.kind === "team") {
+        winnerId = pending.teamId;
+      } else if (
+        pending.kind === "server" &&
+        variant.kind === "end" &&
+        variant.challenge === "north" &&
+        sortedEntries[0]?.guesses?.length
+      ) {
+        // Server can't compute avg-error (no guess data persisted server-side).
+        // Resolve client-side: top of sortedEntries is the lowest-avg team.
+        winnerId = sortedEntries[0].team.id;
+      }
       await run(() => onEnd?.(winnerId));
       setPending(null);
       setPicking(false);
     }
 
+    const isNorthVariant = variant.challenge === "north";
     const pendingLabel =
       pending?.kind === "team"
         ? pending.label
         : pending?.kind === "server"
-          ? anyCompleted
-            ? "first finisher"
-            : "highest progress"
+          ? isNorthVariant
+            ? "smallest avg error"
+            : anyCompleted
+              ? "first finisher"
+              : "highest progress"
           : null;
 
     return (
@@ -134,8 +165,21 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
         <div className="flex flex-col gap-2">
           {sortedEntries.map((e, idx) => {
             const isDone = e.completedAt !== null;
-            const isRecommended = idx === 0 && isDone;
-            const valueLabel = def.formatProgress(e.value, e.threshold);
+            const isNorth = variant.challenge === "north";
+            const guessCount = e.guesses?.length ?? 0;
+            const avgErr =
+              isNorth && guessCount > 0
+                ? (e.guesses ?? []).reduce((s, g) => s + g.errorDeg, 0) /
+                  guessCount
+                : null;
+            const isFirst = idx === 0 && (isNorth ? guessCount > 0 : isDone);
+            const valueLabel = isNorth
+              ? guessCount === 0
+                ? "no guesses"
+                : `${avgErr!.toFixed(0)}° avg · ${guessCount} guess${
+                    guessCount === 1 ? "" : "es"
+                  }`
+              : def.formatProgress(e.value, e.threshold);
             const isSelected =
               pending?.kind === "team" && pending.teamId === e.team.id;
             return (
@@ -152,32 +196,30 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
                 }
                 className={`w-full text-left px-3 py-3 rounded-xl font-bold disabled:opacity-50 transition-all ${
                   isSelected
-                    ? "bg-gradient-party ring-2 ring-white shadow-[0_0_18px_rgba(255,140,66,0.45)]"
-                    : isRecommended
-                      ? "bg-gradient-done ring-2 ring-accent-green"
-                      : isDone
-                        ? "bg-bg-card border border-accent-green/40"
-                        : "bg-bg-card border border-white/5"
+                    ? "bg-bg-card ring-2 ring-accent-orange shadow-[0_0_18px_rgba(255,140,66,0.35)]"
+                    : "bg-bg-card border border-white/10"
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <span className="text-xl">{e.team.emoji}</span>
                   <span className="flex-1 truncate">{e.team.name}</span>
-                  {isRecommended && !isSelected && (
-                    <span className="text-[10px] uppercase tracking-widest text-accent-green font-extrabold">
-                      🏆 first
+                  {isFirst && !isSelected && (
+                    <span className="text-[10px] uppercase tracking-widest opacity-70 font-extrabold">
+                      🏆 {isNorth ? "best avg" : "first"}
                     </span>
                   )}
                   {isSelected && (
-                    <span className="text-[11px] uppercase tracking-widest font-extrabold">
+                    <span className="text-[11px] uppercase tracking-widest font-extrabold text-accent-orange">
                       ✓ selected
                     </span>
                   )}
                 </div>
                 <div className="text-[11px] opacity-90 mt-0.5 tabular-nums">
-                  {isDone
-                    ? `✅ finished ${fmtTime(e.completedAt!)}`
-                    : valueLabel}
+                  {isNorth
+                    ? valueLabel
+                    : isDone
+                      ? `✅ finished ${fmtTime(e.completedAt!)}`
+                      : valueLabel}
                 </div>
                 {e.players && e.players.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
@@ -210,7 +252,11 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
             }`}
           >
             🤖 let server pick{" "}
-            {anyCompleted ? "(first finisher)" : "(highest progress)"}
+            {isNorthVariant
+              ? "(smallest avg error)"
+              : anyCompleted
+                ? "(first finisher)"
+                : "(highest progress)"}
             {pending?.kind === "server" && (
               <span className="ml-2 text-[11px] uppercase tracking-widest font-extrabold">
                 ✓
@@ -252,9 +298,9 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
         type="button"
         disabled={busy}
         onClick={() => run(onRedo)}
-        className="text-xs underline opacity-70 hover:opacity-100 disabled:opacity-30"
+        className="w-full py-3 rounded-xl bg-bg-deep border border-white/20 text-sm font-bold tracking-widest disabled:opacity-50"
       >
-        ↻ redo this round
+        {busy ? "RESTARTING…" : "↻ REDO THIS ROUND"}
       </button>
     </div>
   );

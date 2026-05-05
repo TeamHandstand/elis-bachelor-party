@@ -56,12 +56,11 @@ export default function PlayPage() {
 
   const event = useToastyStore((s) => s.event);
 
-  // Lobby/finished routing.
+  // Lobby routing. (Once finished, players stay on the journey — the final
+  // standings already render here; HOME on /done sends them back here too.)
   useEffect(() => {
     if (event?.status === "lobby") {
       router.replace(`/e/${code}/lobby`);
-    } else if (event?.status === "finished") {
-      router.replace(`/e/${code}/done`);
     }
   }, [event?.status, code, router]);
 

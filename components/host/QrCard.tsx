@@ -76,12 +76,22 @@ export default function QrCard({ code, baseUrl }: Props) {
         </div>
       </div>
 
-      <button
-        onClick={copy}
-        className="mt-4 px-4 py-2 rounded-xl border border-white/10 text-sm hover:bg-white/5"
-      >
-        {copied ? "✅ Copied!" : "📋 Copy URL"}
-      </button>
+      <div className="mt-4 flex flex-wrap gap-2 justify-center">
+        <button
+          onClick={copy}
+          className="px-4 py-2 rounded-xl border border-white/10 text-sm hover:bg-white/5"
+        >
+          {copied ? "✅ Copied!" : "📋 Copy URL"}
+        </button>
+        <a
+          href={joinUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-4 py-2 rounded-xl border border-white/10 text-sm hover:bg-white/5"
+        >
+          ↗ Launch in new tab
+        </a>
+      </div>
     </div>
   );
 }

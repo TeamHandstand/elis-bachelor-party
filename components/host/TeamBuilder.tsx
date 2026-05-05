@@ -29,6 +29,7 @@ interface Props {
 }
 
 const POOL_ID = "__pool__";
+const NEW_TEAM_ID = "__new_team__";
 const EMOJI_OPTIONS = ["🍕", "🍝", "🍍", "🌭", "🍔", "🌮", "🍣", "🥨", "🍩", "🍦", "🥑", "🥩", "🥟", "🍤", "🍪"];
 
 export default function TeamBuilder({ event, teams, players, onChange }: Props) {
@@ -66,6 +67,27 @@ export default function TeamBuilder({ event, teams, players, onChange }: Props) 
     if (!overId) return;
     const player = playersById[playerId];
     if (!player) return;
+
+    // Drop on the "+ new team" slot → create a team server-side, then move
+    // the player onto it.
+    if (overId === NEW_TEAM_ID) {
+      try {
+        const created = await createTeamFetch(event.code);
+        const optimistic = players.map((p) =>
+          p.id === playerId ? { ...p, teamId: created.team.id } : p,
+        );
+        onChange({ teams: [...teams, created.team], players: optimistic });
+        const res = await assignPlayer(event.code, playerId, {
+          teamId: created.team.id,
+        });
+        const final = optimistic.map((p) => (p.id === playerId ? res.player : p));
+        onChange({ players: final });
+      } catch {
+        // Rollback team list + players if the chain failed.
+        onChange({ teams, players });
+      }
+      return;
+    }
 
     const targetTeamId = overId === POOL_ID ? null : overId;
     if (player.teamId === targetTeamId) return;
@@ -217,26 +239,24 @@ export default function TeamBuilder({ event, teams, players, onChange }: Props) 
 
         <NamePool players={grouped.pool} />
 
-        {teams.length === 0 ? (
-          <div className="rounded-xl2 bg-bg-card p-6 text-center text-sm opacity-60">
-            No teams yet — tap{" "}
-            <span className="font-bold">+ Add team</span> to create one.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {teams.map((team, idx) => (
-              <TeamBox
-                key={team.id}
-                team={team}
-                players={grouped.byTeam[team.id] ?? []}
-                gradient={teamGradient(idx)}
-                onRename={(name) => updateTeam(team.id, { name })}
-                onEmoji={(emoji) => updateTeam(team.id, { emoji })}
-                onDelete={() => removeTeam(team.id)}
-              />
-            ))}
-          </div>
-        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {teams.map((team, idx) => (
+            <TeamBox
+              key={team.id}
+              team={team}
+              players={grouped.byTeam[team.id] ?? []}
+              gradient={teamGradient(idx)}
+              onRename={(name) => updateTeam(team.id, { name })}
+              onEmoji={(emoji) => updateTeam(team.id, { emoji })}
+              onDelete={() => removeTeam(team.id)}
+            />
+          ))}
+          <NewTeamSlot
+            onClickCreate={addTeam}
+            busy={adding}
+            empty={teams.length === 0}
+          />
+        </div>
       </section>
 
       <DragOverlay>
@@ -257,6 +277,41 @@ function teamGradient(idx: number): string {
     default:
       return "bg-gradient-done";
   }
+}
+
+function NewTeamSlot({
+  onClickCreate,
+  busy,
+  empty,
+}: {
+  onClickCreate: () => void;
+  busy: boolean;
+  empty: boolean;
+}) {
+  const { isOver, setNodeRef } = useDroppable({ id: NEW_TEAM_ID });
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onClickCreate}
+      disabled={busy}
+      className={`rounded-xl2 min-h-[180px] flex flex-col items-center justify-center text-center p-4 border-2 border-dashed transition-all ${
+        isOver
+          ? "border-accent-pink bg-accent-pink/10 scale-[1.01]"
+          : "border-white/20 hover:border-accent-orange/60 hover:bg-white/5"
+      } disabled:opacity-50`}
+    >
+      <div className="text-4xl mb-2 opacity-80">➕</div>
+      <div className="font-display text-base font-extrabold tracking-wider">
+        {busy ? "creating…" : "NEW TEAM"}
+      </div>
+      <div className="text-[11px] opacity-70 mt-1 max-w-[200px]">
+        {empty
+          ? "Drop a name here or tap to create your first team."
+          : "Drop a player here to spawn a new team."}
+      </div>
+    </button>
+  );
 }
 
 function NamePool({ players }: { players: Player[] }) {

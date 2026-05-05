@@ -36,12 +36,13 @@ export function JourneyView({ code, myPlayerId }: Props) {
   const isHostPlayer =
     !!myPlayerId && event?.hostPlayerId === myPlayerId;
 
-  // Cookie-host detection: anyone with a valid host cookie also gets host
-  // controls, even without being the designated host-player. Lets Sam start
-  // the race from the game UI without crowning himself first.
+  // Cookie-host fallback: only when nobody is crowned as host-player. If
+  // event.hostPlayerId is set, we trust that single player to be the host —
+  // otherwise Sam's host cookie would leak host controls to any browser he
+  // ever logged in as host on.
   const { isHost: isCookieHost } = useCookieHost();
 
-  const isHost = isHostPlayer || isCookieHost;
+  const isHost = isHostPlayer || (!event?.hostPlayerId && isCookieHost);
   const teamList = useMemo(() => Object.values(teams), [teams]);
   const progressMap = useToastyStore((s) => s.progress);
   const playersMap = useToastyStore((s) => s.players);
@@ -68,6 +69,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
         value: cur?.value ?? 0,
         threshold,
         players: playersByTeam[t.id] ?? [],
+        guesses: cur?.guesses ?? [],
       };
     });
   }, [event, teamList, progressMap, playersMap]);
@@ -157,20 +159,20 @@ export function JourneyView({ code, myPlayerId }: Props) {
       : null;
 
   async function handleStart() {
-    if (!myPlayerId) return;
     try {
-      await startRound(code, { playerId: myPlayerId });
+      await startRound(code, {
+        ...(myPlayerId ? { playerId: myPlayerId } : {}),
+      });
     } catch (err) {
       console.error("[journey] startRound failed", err);
     }
   }
 
   async function handleEnd(winnerTeamId: string | null) {
-    if (!myPlayerId) return;
     try {
       await endRound(code, {
         mode: "host",
-        playerId: myPlayerId,
+        ...(myPlayerId ? { playerId: myPlayerId } : {}),
         ...(winnerTeamId ? { teamId: winnerTeamId } : {}),
       });
     } catch (err) {
@@ -179,10 +181,9 @@ export function JourneyView({ code, myPlayerId }: Props) {
   }
 
   async function handleRedo(roundIndex: number) {
-    if (!myPlayerId) return;
     try {
       await startRound(code, {
-        playerId: myPlayerId,
+        ...(myPlayerId ? { playerId: myPlayerId } : {}),
         redo: true,
         roundIndex,
       });

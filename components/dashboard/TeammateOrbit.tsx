@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { useToastyStore } from "@/lib/store";
 import { useTeammates } from "@/lib/store/selectors";
 import { CHALLENGES } from "@/lib/challenges";
 import type { ChallengeId, Player, TeamProgress } from "@/lib/types";
+import { RenameModal } from "./RenameModal";
 
 const AVATAR_GRADIENTS = [
   "bg-gradient-party",
@@ -47,6 +49,11 @@ export function TeammateOrbit() {
   const teammates = useTeammates();
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
   const myPlayerId = useToastyStore((s) => s.myPlayerId);
+  const myDeviceId = useToastyStore((s) => s.myDeviceId);
+  const event = useToastyStore((s) => s.event);
+  const playersMap = useToastyStore((s) => s.players);
+
+  const [editing, setEditing] = useState(false);
 
   if (!teammates.length) {
     return (
@@ -63,31 +70,78 @@ export function TeammateOrbit() {
     return a.joinedAt.localeCompare(b.joinedAt);
   });
 
+  const me = myPlayerId ? playersMap[myPlayerId] ?? null : null;
+
+  async function handleRename({ name }: { name: string }) {
+    if (!event || !me || !myDeviceId) return;
+    const res = await fetch(
+      `/api/events/${event.code}/players/${me.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, deviceId: myDeviceId }),
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `Rename failed (${res.status})`);
+    }
+    const data = (await res.json()) as { player: Player };
+    useToastyStore.setState({
+      players: { ...playersMap, [data.player.id]: data.player },
+    });
+  }
+
   return (
-    <div className="flex justify-center gap-2 my-3">
-      {ordered.map((p, i) => {
-        const top = topContribution(p, myProgress);
-        const initial = (p.name?.trim()?.[0] ?? "?").toUpperCase();
-        const isMe = p.id === myPlayerId;
-        return (
-          <div key={p.id} className="w-20 text-center">
-            <div
-              className={`w-12 h-12 rounded-full mx-auto mb-1 flex items-center justify-center font-extrabold text-lg ${
-                AVATAR_GRADIENTS[i % AVATAR_GRADIENTS.length]
-              } ${isMe ? "ring-2 ring-white" : ""}`}
+    <>
+      <div className="flex justify-center gap-2 my-3">
+        {ordered.map((p, i) => {
+          const top = topContribution(p, myProgress);
+          const initial = (p.name?.trim()?.[0] ?? "?").toUpperCase();
+          const isMe = p.id === myPlayerId;
+          const InnerEl = isMe ? "button" : "div";
+          return (
+            <InnerEl
+              key={p.id}
+              {...(isMe
+                ? {
+                    type: "button" as const,
+                    onClick: () => setEditing(true),
+                    "aria-label": "Edit your name",
+                  }
+                : {})}
+              className={`w-20 text-center ${
+                isMe ? "active:scale-[0.97] transition-transform" : ""
+              }`}
             >
-              {initial}
-            </div>
-            <div className="text-[11px] font-semibold truncate">
-              {p.name}
-              {isMe ? " (you)" : ""}
-            </div>
-            <div className="text-[10px] opacity-70 truncate">
-              {top ? formatStat(top.challenge, top.value) : "warming up"}
-            </div>
-          </div>
-        );
-      })}
-    </div>
+              <div
+                className={`w-12 h-12 rounded-full mx-auto mb-1 flex items-center justify-center font-extrabold text-lg ${
+                  AVATAR_GRADIENTS[i % AVATAR_GRADIENTS.length]
+                } ${isMe ? "ring-2 ring-white" : ""}`}
+              >
+                {initial}
+              </div>
+              <div className="text-[11px] font-semibold truncate">
+                {p.name}
+                {isMe ? " (you) ✎" : ""}
+              </div>
+              <div className="text-[10px] opacity-70 truncate">
+                {top ? formatStat(top.challenge, top.value) : "warming up"}
+              </div>
+            </InnerEl>
+          );
+        })}
+      </div>
+
+      {editing && me && (
+        <RenameModal
+          title="Edit your name"
+          initial={me.name}
+          busyLabel="RENAMING…"
+          onClose={() => setEditing(false)}
+          onSubmit={handleRename}
+        />
+      )}
+    </>
   );
 }

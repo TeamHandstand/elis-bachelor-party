@@ -282,6 +282,34 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         });
         break;
       }
+
+      case "player-renamed": {
+        const existing = state.players[msg.playerId];
+        if (!existing) return;
+        set({
+          players: {
+            ...state.players,
+            [msg.playerId]: { ...existing, name: msg.name },
+          },
+        });
+        break;
+      }
+
+      case "team-renamed": {
+        const existing = state.teams[msg.teamId];
+        if (!existing) return;
+        set({
+          teams: {
+            ...state.teams,
+            [msg.teamId]: {
+              ...existing,
+              name: msg.name,
+              emoji: msg.emoji,
+            },
+          },
+        });
+        break;
+      }
     }
   },
 

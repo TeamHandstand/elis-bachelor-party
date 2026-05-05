@@ -71,6 +71,10 @@ export async function getEvent(code: string): Promise<GetEventResponse> {
   return http<GetEventResponse>(`/api/events/${code}`, { method: "GET", cache: "no-store" });
 }
 
+export async function deleteEvent(code: string): Promise<{ ok: true }> {
+  return http<{ ok: true }>(`/api/events/${code}`, { method: "DELETE" });
+}
+
 export async function patchEvent(
   code: string,
   body: UpdateEventRequest

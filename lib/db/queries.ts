@@ -157,17 +157,10 @@ export async function createEvent(input: {
       const eventRow = inserted[0];
       if (!eventRow) throw new Error("Insert returned no row");
 
-      const teamValues = DEFAULT_TEAMS.map((t) => ({
-        eventId: eventRow.id,
-        name: t.name,
-        emoji: t.emoji,
-        color: t.color,
-      }));
-      const teamRows = await db.insert(teams).values(teamValues).returning();
-
+      // No default teams — host creates them on demand from the team builder.
       return {
         event: eventRowToConfig(eventRow),
-        teams: teamRows.map(teamRowToTeam),
+        teams: [],
       };
     } catch (err) {
       lastErr = err;
@@ -314,6 +307,112 @@ export async function upsertPlayer(input: {
     .returning();
   if (!inserted[0]) return null;
   return { player: playerRowToPlayer(inserted[0]), created: true };
+}
+
+export async function renamePlayer(input: {
+  code: string;
+  playerId: string;
+  name: string;
+}): Promise<Player | null> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return null;
+
+  const updated = await db
+    .update(players)
+    .set({ name: input.name })
+    .where(
+      and(eq(players.id, input.playerId), eq(players.eventId, eventRow.id)),
+    )
+    .returning();
+  if (!updated[0]) return null;
+  return playerRowToPlayer(updated[0]);
+}
+
+export async function getPlayerByIdAndEvent(input: {
+  code: string;
+  playerId: string;
+}): Promise<Player | null> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return null;
+  const rows = await db
+    .select()
+    .from(players)
+    .where(
+      and(eq(players.id, input.playerId), eq(players.eventId, eventRow.id)),
+    )
+    .limit(1);
+  return rows[0] ? playerRowToPlayer(rows[0]) : null;
+}
+
+export async function renameTeam(input: {
+  code: string;
+  teamId: string;
+  name?: string;
+  emoji?: string;
+}): Promise<Team | null> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return null;
+
+  const patch: Partial<typeof teams.$inferInsert> = {};
+  if (typeof input.name === "string") patch.name = input.name;
+  if (typeof input.emoji === "string") patch.emoji = input.emoji;
+  if (Object.keys(patch).length === 0) {
+    const existing = await db
+      .select()
+      .from(teams)
+      .where(and(eq(teams.id, input.teamId), eq(teams.eventId, eventRow.id)))
+      .limit(1);
+    return existing[0] ? teamRowToTeam(existing[0]) : null;
+  }
+
+  const updated = await db
+    .update(teams)
+    .set(patch)
+    .where(and(eq(teams.id, input.teamId), eq(teams.eventId, eventRow.id)))
+    .returning();
+  if (!updated[0]) return null;
+  return teamRowToTeam(updated[0]);
+}
+
+export async function isDeviceOnTeam(input: {
+  code: string;
+  teamId: string;
+  deviceId: string;
+}): Promise<boolean> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return false;
+  const rows = await db
+    .select({ id: players.id })
+    .from(players)
+    .where(
+      and(
+        eq(players.eventId, eventRow.id),
+        eq(players.teamId, input.teamId),
+        eq(players.deviceId, input.deviceId),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function assignPlayerToTeam(input: {

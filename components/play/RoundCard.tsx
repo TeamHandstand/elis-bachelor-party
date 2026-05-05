@@ -38,9 +38,7 @@ export function RoundCard({
 
   switch (state.kind) {
     case "past":
-      toneClasses = isMyTeamWinner
-        ? "bg-gradient-done text-white"
-        : "bg-bg-card text-white border border-white/10";
+      toneClasses = "bg-bg-card text-white border border-white/10";
       trailing = state.winner ? (
         <div className="flex items-center gap-2">
           <span className="text-xl">🥇</span>
@@ -49,9 +47,7 @@ export function RoundCard({
       ) : null;
       break;
     case "current-decided":
-      toneClasses = isMyTeamWinner
-        ? "bg-gradient-done text-white ring-2 ring-white/40"
-        : "bg-bg-card text-white border-2 border-accent-orange/40";
+      toneClasses = "bg-bg-card text-white border-2 border-accent-orange/40";
       trailing = state.winner ? (
         <div className="flex items-center gap-2">
           <span className="text-xl">🥇</span>

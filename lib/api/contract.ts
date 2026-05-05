@@ -83,12 +83,30 @@ export interface JoinEventResponse {
 }
 
 // ---------- PATCH /api/events/:code/players/:playerId ----------
-// Host moves a player to a team (or back to pool with teamId=null).
+// Host moves a player to a team (or back to pool with teamId=null), OR a
+// player renames themselves. Auth:
+//  - Host-cookie: any field allowed (teamId for assignment, name for rename).
+//  - Player auth via { deviceId } that matches the player's stored deviceId:
+//    only `name` is allowed.
 export interface AssignPlayerRequest {
-  teamId: string | null;
+  teamId?: string | null;
+  name?: string;
+  deviceId?: string;
 }
 export interface AssignPlayerResponse {
   player: Player;
+}
+
+// ---------- PATCH /api/events/:code/teams/:teamId ----------
+// A player on the team (or host-cookie) renames the team / changes emoji.
+// Player auth via { deviceId } matching a player on this team.
+export interface UpdateTeamRequest {
+  name?: string;
+  emoji?: string;
+  deviceId?: string;
+}
+export interface UpdateTeamResponse {
+  team: Team;
 }
 
 // ---------- POST /api/events/:code/start ----------

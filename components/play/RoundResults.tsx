@@ -57,10 +57,10 @@ function sortEntries(entries: ResultEntry[], challenge: ChallengeId): ResultEntr
     return [...entries].sort((a, b) => {
       const ag = a.guesses?.length ?? 0;
       const bg = b.guesses?.length ?? 0;
-      // teams with at least one guess come first, then by lowest total error
+      // teams with at least one guess come first, then by lowest average error
       if ((ag > 0) !== (bg > 0)) return ag > 0 ? -1 : 1;
       if (ag === 0 && bg === 0) return 0;
-      return northTotalError(a) - northTotalError(b);
+      return northAvgError(a) - northAvgError(b);
     });
   }
   return [...entries].sort((a, b) => {
@@ -117,6 +117,8 @@ export function RoundResults({
   const winnerPrimary = winnerEntry
     ? primaryLabel(winnerEntry, challenge, threshold, roundStartedAt)
     : null;
+  const iWon = !!myTeamId && myTeamId === winnerTeamId;
+  const haveMyTeam = !!myTeamId && entries.some((e) => e.team.id === myTeamId);
 
   return (
     <div className="flex flex-col gap-3 p-4 overflow-y-auto">
@@ -128,16 +130,25 @@ export function RoundResults({
         <div className="text-xs uppercase tracking-widest opacity-70 mt-1">
           {def.label}
         </div>
+        {haveMyTeam && winnerEntry ? (
+          <div
+            className={`mt-3 font-display text-2xl font-extrabold tracking-widest ${
+              iWon ? "text-accent-green" : "text-accent-pink"
+            }`}
+          >
+            {iWon ? "🎉 YOU WON" : "💀 YOU LOST"}
+          </div>
+        ) : null}
         {winnerEntry ? (
-          <div className="mt-4 mx-auto inline-block px-4 py-3 rounded-2xl bg-gradient-done text-white shadow-[0_0_24px_rgba(255,140,66,0.45)]">
-            <div className="text-[10px] uppercase tracking-[0.3em] opacity-90">
+          <div className="mt-3 mx-auto inline-block px-4 py-3 rounded-2xl bg-bg-card border border-white/10">
+            <div className="text-[10px] uppercase tracking-[0.3em] opacity-70">
               and the winner is…
             </div>
             <div className="font-display text-xl font-extrabold mt-1">
               🏆 {winnerEntry.team.emoji} {winnerEntry.team.name}
             </div>
             {winnerPrimary && (
-              <div className="text-xs uppercase tracking-widest opacity-90 mt-1 tabular-nums">
+              <div className="text-xs uppercase tracking-widest opacity-70 mt-1 tabular-nums">
                 {winnerPrimary}
               </div>
             )}
@@ -179,7 +190,9 @@ function primaryLabel(
   if (challenge === "north") {
     const guesses = entry.guesses ?? [];
     if (guesses.length === 0) return "no guesses";
-    return `${northAvgError(entry).toFixed(0)}° avg error`;
+    return `${northAvgError(entry).toFixed(0)}° avg error · ${guesses.length} ${
+      guesses.length === 1 ? "guess" : "guesses"
+    }`;
   }
   if (entry.completedAt !== null) {
     const ms = timeTaken(entry, roundStartedAt);
@@ -319,9 +332,9 @@ function TeamResultRow({
       secondary = "—";
     } else {
       primary = `${northAvgError(entry).toFixed(0)}° avg`;
-      secondary = `${northTotalError(entry).toFixed(0)}° total · ${guesses.length} ${
+      secondary = `${guesses.length} ${
         guesses.length === 1 ? "guess" : "guesses"
-      }`;
+      } in`;
     }
   } else if (entry.completedAt !== null) {
     primary = formatTime(ms);
@@ -331,11 +344,11 @@ function TeamResultRow({
     secondary = def.formatProgress(entry.value, threshold);
   }
 
-  const rowClass = isWinner
-    ? "bg-gradient-done text-white ring-2 ring-accent-green"
-    : isMine
-      ? "bg-bg-card border-2 border-accent-orange/40"
-      : "bg-bg-card";
+  // Per design: only highlight MY team faintly. Don't tint the winning team
+  // — the trophy badge is enough.
+  const rowClass = isMine
+    ? "bg-accent-orange/10 border border-accent-orange/40"
+    : "bg-bg-card border border-white/10";
 
   return (
     <div className={`rounded-2xl p-3 ${rowClass}`}>
