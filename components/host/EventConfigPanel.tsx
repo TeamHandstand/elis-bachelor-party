@@ -1,8 +1,24 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { EventConfig } from "@/lib/types";
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import type { ChallengeId, EventConfig } from "@/lib/types";
 import type { UpdateEventRequest } from "@/lib/api/contract";
-import { CHALLENGES, CHALLENGE_ORDER } from "@/lib/challenges";
+import { CHALLENGES, fullChallengeOrder } from "@/lib/challenges";
 import { patchEvent } from "./_fetch";
 
 interface Props {
@@ -20,7 +36,6 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
   const [savedFlash, setSavedFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Refresh local state if a fresh event prop arrives (e.g., after reset).
   const lastEventId = useRef(event.id);
   useEffect(() => {
     if (event.id !== lastEventId.current) {
@@ -31,7 +46,6 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
     }
   }, [event]);
 
-  // Debounced auto-save whenever inputs change.
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -56,9 +70,12 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
     }, SAVE_DEBOUNCE_MS);
   }
 
-  useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   function updateTitle(v: string) {
     setTitle(v);
@@ -69,13 +86,34 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
     scheduleSave({ groomName: v });
   }
   function updateChallenge(
-    id: keyof EventConfig["challenges"],
-    patch: Partial<{ enabled: boolean; threshold: number }>
+    id: ChallengeId,
+    patch: Partial<{ enabled: boolean; threshold: number }>,
   ) {
-    const next = {
+    const next: EventConfig["challenges"] = {
       ...challenges,
       [id]: { ...challenges[id], ...patch },
     };
+    setChallenges(next);
+    scheduleSave({ challenges: next });
+  }
+
+  const ordered = fullChallengeOrder(challenges);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
+
+  function onDragEnd(e: DragEndEvent) {
+    if (!e.over || e.active.id === e.over.id) return;
+    const oldIndex = ordered.indexOf(e.active.id as ChallengeId);
+    const newIndex = ordered.indexOf(e.over.id as ChallengeId);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const newOrder = arrayMove(ordered, oldIndex, newIndex);
+    const next: EventConfig["challenges"] = { ...challenges };
+    newOrder.forEach((id, idx) => {
+      next[id] = { ...next[id], order: idx };
+    });
     setChallenges(next);
     scheduleSave({ challenges: next });
   }
@@ -115,58 +153,118 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
       </div>
 
       <div className="bg-bg-card rounded-xl2 p-5 space-y-3">
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-baseline justify-between flex-wrap gap-2">
           <h2 className="font-display text-xl font-bold">🎯 Challenges</h2>
           <span className="text-xs opacity-50">
-            Toggle and tune thresholds
+            Drag to reorder · toggle to disable · tune thresholds
           </span>
         </div>
 
-        <div className="divide-y divide-white/5">
-          {CHALLENGE_ORDER.map((id) => {
-            const def = CHALLENGES[id];
-            const cur = challenges[id];
-            return (
-              <div
-                key={id}
-                className="py-3 flex flex-wrap items-center gap-3"
-              >
-                <label className="flex items-center gap-3 flex-1 min-w-[180px] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={cur.enabled}
-                    onChange={(e) =>
-                      updateChallenge(id, { enabled: e.target.checked })
-                    }
-                    className="size-5 accent-accent-pink"
-                  />
-                  <span className="text-2xl">{def.emoji}</span>
-                  <div className="leading-tight">
-                    <div className="font-bold">{def.label}</div>
-                    <div className="text-xs opacity-60">{def.description}</div>
-                  </div>
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    value={cur.threshold}
-                    onChange={(e) =>
-                      updateChallenge(id, {
-                        threshold: Number(e.target.value) || 0,
-                      })
-                    }
-                    disabled={!cur.enabled}
-                    className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink disabled:opacity-40"
-                  />
-                  <span className="text-xs opacity-60 w-20">{def.unit}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext items={ordered} strategy={verticalListSortingStrategy}>
+            <div className="divide-y divide-white/5">
+              {ordered.map((id, idx) => (
+                <SortableChallengeRow
+                  key={id}
+                  id={id}
+                  ordinal={idx + 1}
+                  enabled={challenges[id]?.enabled ?? false}
+                  threshold={
+                    challenges[id]?.threshold ??
+                    CHALLENGES[id].defaultThreshold
+                  }
+                  onToggle={(checked) =>
+                    updateChallenge(id, { enabled: checked })
+                  }
+                  onThreshold={(t) => updateChallenge(id, { threshold: t })}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </div>
     </section>
+  );
+}
+
+function SortableChallengeRow({
+  id,
+  ordinal,
+  enabled,
+  threshold,
+  onToggle,
+  onThreshold,
+}: {
+  id: ChallengeId;
+  ordinal: number;
+  enabled: boolean;
+  threshold: number;
+  onToggle: (checked: boolean) => void;
+  onThreshold: (n: number) => void;
+}) {
+  const def = CHALLENGES[id];
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="py-3 flex flex-wrap items-center gap-3"
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label="Drag to reorder"
+        className="cursor-grab touch-none px-2 py-1 rounded-lg bg-bg-deep border border-white/10 text-sm font-bold opacity-70 hover:opacity-100"
+      >
+        ⋮⋮
+      </button>
+      <div className="font-display font-extrabold text-lg opacity-60 w-6 text-center tabular-nums">
+        {ordinal}
+      </div>
+      <label className="flex items-center gap-3 flex-1 min-w-[180px] cursor-pointer">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onToggle(e.target.checked)}
+          className="size-5 accent-accent-pink"
+        />
+        <span className="text-2xl">{def.emoji}</span>
+        <div className="leading-tight">
+          <div className="font-bold">{def.label}</div>
+          <div className="text-xs opacity-60">{def.description}</div>
+        </div>
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={1}
+          value={threshold}
+          onChange={(e) => onThreshold(Number(e.target.value) || 0)}
+          disabled={!enabled}
+          className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink disabled:opacity-40"
+        />
+        <span className="text-xs opacity-60 w-20">{def.unit}</span>
+      </div>
+    </div>
   );
 }
 
