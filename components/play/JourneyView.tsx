@@ -44,9 +44,10 @@ export function JourneyView({ code, myPlayerId }: Props) {
   const isHost = isHostPlayer || isCookieHost;
   const teamList = useMemo(() => Object.values(teams), [teams]);
   const progressMap = useToastyStore((s) => s.progress);
+  const playersMap = useToastyStore((s) => s.players);
 
-  // Build the rich entry list for the End Round picker — completion times and
-  // current values per team for the active challenge.
+  // Build the rich entry list for the End Round picker — completion times,
+  // current values, and rosters per team for the active challenge.
   const endPickerEntries = useMemo<EndPickerEntry[]>(() => {
     if (!event || event.currentRoundIndex === null) return [];
     const order = enabledChallengeOrder(event.challenges);
@@ -54,6 +55,11 @@ export function JourneyView({ code, myPlayerId }: Props) {
     if (!ch) return [];
     const def = CHALLENGES[ch];
     const threshold = event.challenges[ch]?.threshold ?? def.defaultThreshold;
+    const playersByTeam: Record<string, typeof playersMap[string][]> = {};
+    for (const p of Object.values(playersMap)) {
+      if (!p.teamId) continue;
+      (playersByTeam[p.teamId] ??= []).push(p);
+    }
     return teamList.map((t) => {
       const cur = progressMap[t.id]?.[ch];
       return {
@@ -61,9 +67,10 @@ export function JourneyView({ code, myPlayerId }: Props) {
         completedAt: cur?.completedAt ?? null,
         value: cur?.value ?? 0,
         threshold,
+        players: playersByTeam[t.id] ?? [],
       };
     });
-  }, [event, teamList, progressMap]);
+  }, [event, teamList, progressMap, playersMap]);
 
   const order = useMemo<ChallengeId[]>(() => {
     if (!event) return [];

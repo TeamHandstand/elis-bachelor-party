@@ -198,3 +198,18 @@ export async function activateEvent(
     body,
   });
 }
+
+import type {
+  JoinEventRequest,
+  JoinEventResponse,
+} from "@/lib/api/contract";
+
+export async function addPlayer(
+  code: string,
+  body: JoinEventRequest,
+): Promise<JoinEventResponse> {
+  return http<JoinEventResponse>(`/api/events/${code}/players`, {
+    method: "POST",
+    body,
+  });
+}

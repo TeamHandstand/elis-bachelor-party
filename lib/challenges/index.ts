@@ -73,6 +73,37 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
   },
 };
 
+/**
+ * Big imperative command shown at the top of each round-play page so players
+ * always know the goal at a glance. Threshold is event-configurable, so we
+ * format it in here rather than hard-coding numbers in the description.
+ */
+export function challengeCommand(id: ChallengeId, threshold: number): string {
+  switch (id) {
+    case "distance": {
+      const miles = threshold / 1609;
+      const milesLabel =
+        Math.abs(miles - Math.round(miles)) < 0.05
+          ? `${Math.round(miles)}`
+          : miles.toFixed(2);
+      const unit = Math.abs(miles - 1) < 0.001 ? "mile" : "miles";
+      return `Travel ${milesLabel} collective ${unit} as a team!`;
+    }
+    case "steps":
+      return `Take ${threshold.toLocaleString()} steps together as a team!`;
+    case "taps":
+      return `Tap the screen ${threshold.toLocaleString()} times as a team!`;
+    case "scream":
+      return `All teammates scream above 80 dB for ${threshold} sustained seconds!`;
+    case "shake":
+      return `All teammates shake your phones simultaneously for ${threshold} seconds!`;
+    case "spin":
+      return `Spin in place — rack up ${threshold.toLocaleString()} rotations as a team!`;
+    case "north":
+      return `Each teammate gets one shot — guess true north!`;
+  }
+}
+
 export const CHALLENGE_ORDER: ChallengeId[] = [
   "distance",
   "steps",

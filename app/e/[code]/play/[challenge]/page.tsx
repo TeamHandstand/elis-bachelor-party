@@ -1,13 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useProgressFlush } from "@/lib/store/flush";
 import { useToastyStore } from "@/lib/store";
 import { normalizeEventCode } from "@/lib/utils/code";
-import { CHALLENGES, enabledChallengeOrder } from "@/lib/challenges";
+import {
+  CHALLENGES,
+  challengeCommand,
+  enabledChallengeOrder,
+} from "@/lib/challenges";
 import { useStandings } from "@/lib/store/selectors";
 import type { ChallengeId } from "@/lib/types";
 import { CountdownOverlay } from "@/components/play/CountdownOverlay";
@@ -125,9 +129,47 @@ export default function ChallengePage() {
   // journey via the back arrow; the host advances to the next round, which
   // triggers a round-start that lands everyone on the next challenge view.
 
-  // No auto-end: every team gets a chance to keep going even after one
-  // finishes. The host explicitly ends the round; the server prefers the
-  // first-completed team in its recommended winner.
+  // Auto-end the round once every team has completed the challenge. The
+  // server picks the first finisher as the winner. Host-only — non-host
+  // clients can't trigger /round/end without auth. Guard with a ref so we
+  // only fire once per round even if the effect re-runs.
+  const autoEndedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isHost || !event) return;
+    if (event.currentRoundStatus !== "live") return;
+    if (autoEndedRef.current === challenge) return;
+    const allTeamsList = Object.values(teamsMap);
+    if (allTeamsList.length === 0) return;
+    const allDone = allTeamsList.every(
+      (t) => progressMap[t.id]?.[challenge]?.completed === true,
+    );
+    if (!allDone) return;
+    autoEndedRef.current = challenge;
+    endRound(code, {
+      mode: "host",
+      ...(myPlayerId ? { playerId: myPlayerId } : {}),
+    }).catch((err) => {
+      console.error("[challenge] auto endRound failed", err);
+      autoEndedRef.current = null;
+    });
+  }, [
+    isHost,
+    event,
+    teamsMap,
+    progressMap,
+    challenge,
+    code,
+    myPlayerId,
+  ]);
+
+  // Reset the guard whenever the round transitions back to 'live' (covers
+  // round-advance + redo). Other transitions don't clear it so we don't
+  // double-fire after the auto-end completes.
+  useEffect(() => {
+    if (event?.currentRoundStatus === "live") {
+      autoEndedRef.current = null;
+    }
+  }, [event?.currentRoundStatus, challenge, event?.currentRoundStartsAt]);
 
   if (!hydrated || !myPlayerId) {
     return (
@@ -220,6 +262,11 @@ export default function ChallengePage() {
   // End-Round picker entries: every team's current progress for this round.
   // HostRoundControls sorts internally (completed-first by completedAt) so
   // the recommended winner is highlighted at the top.
+  const playersByTeam: Record<string, typeof allPlayers[string][]> = {};
+  for (const p of Object.values(allPlayers)) {
+    if (!p.teamId) continue;
+    (playersByTeam[p.teamId] ??= []).push(p);
+  }
   const endPickerEntries: EndPickerEntry[] = Object.values(teamsMap).map(
     (t) => {
       const tp = progressMap[t.id]?.[challenge];
@@ -228,6 +275,7 @@ export default function ChallengePage() {
         completedAt: tp?.completedAt ?? null,
         value: tp?.value ?? 0,
         threshold,
+        players: playersByTeam[t.id] ?? [],
       };
     },
   );
@@ -323,6 +371,7 @@ export default function ChallengePage() {
             players={allPlayers}
             mode="all-teams"
             winnerTeamId={winnerForRound}
+            code={code}
           />
         ) : showMyTeamResult ? (
           <RoundResults
@@ -333,9 +382,17 @@ export default function ChallengePage() {
             entries={resultEntries}
             players={allPlayers}
             mode="my-team"
+            code={code}
           />
         ) : (
-          view
+          <>
+            <div className="px-4 pt-4 pb-2 text-center bg-bg-deep/40 border-b border-white/5">
+              <div className="font-display text-xl sm:text-2xl font-extrabold leading-tight text-accent-orange tracking-wide">
+                {challengeCommand(challenge, threshold)}
+              </div>
+            </div>
+            {view}
+          </>
         )}
       </main>
     </>

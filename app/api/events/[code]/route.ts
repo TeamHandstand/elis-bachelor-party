@@ -15,6 +15,7 @@ import type {
 const ChallengeEntrySchema = z.object({
   enabled: z.boolean(),
   threshold: z.number().finite(),
+  order: z.number().int().nonnegative().optional(),
 });
 
 const ChallengesSchema = z

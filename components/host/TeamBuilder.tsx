@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/core";
 import type { EventConfig, Player, Team } from "@/lib/types";
 import {
+  addPlayer,
   assignPlayer,
   createTeam as createTeamFetch,
   deleteTeam as deleteTeamFetch,
@@ -137,6 +138,34 @@ export default function TeamBuilder({ event, teams, players, onChange }: Props) 
 
   const activePlayer = activeId ? playersById[activeId] : null;
 
+  const [newName, setNewName] = useState("");
+  const [addingPlayer, setAddingPlayer] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  async function handleAddPlayer(e?: React.FormEvent) {
+    e?.preventDefault();
+    const name = newName.trim();
+    if (!name || addingPlayer) return;
+    setAddingPlayer(true);
+    setAddError(null);
+    try {
+      // Synthesize a unique deviceId so the server treats this as a brand-new
+      // player and doesn't merge with any existing host device.
+      const deviceId = `host-added-${
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      }`;
+      const res = await addPlayer(event.code, { name, deviceId });
+      onChange({ players: [...players, res.player] });
+      setNewName("");
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : "Couldn't add player");
+    } finally {
+      setAddingPlayer(false);
+    }
+  }
+
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <section className="space-y-4">
@@ -156,6 +185,35 @@ export default function TeamBuilder({ event, teams, players, onChange }: Props) 
             </button>
           </div>
         </div>
+
+        <form
+          onSubmit={handleAddPlayer}
+          className="bg-bg-card rounded-xl2 p-4 flex items-center gap-2 flex-wrap"
+        >
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-[11px] uppercase tracking-widest opacity-60 mb-1 font-bold">
+              ➕ Add player manually
+            </label>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Player name"
+              maxLength={40}
+              className="w-full rounded-xl bg-bg-deep border border-white/10 px-4 py-3 outline-none focus:border-accent-pink"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={addingPlayer || !newName.trim()}
+            className="rounded-xl px-4 py-3 bg-gradient-party text-sm font-bold disabled:opacity-50 self-end"
+          >
+            {addingPlayer ? "…" : "Add"}
+          </button>
+          {addError ? (
+            <div className="basis-full text-xs text-accent-pink">{addError}</div>
+          ) : null}
+        </form>
 
         <NamePool players={grouped.pool} />
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { CHALLENGES } from "@/lib/challenges";
 import type { ChallengeId, Player, Team } from "@/lib/types";
 
@@ -24,6 +25,8 @@ interface Props {
   // For all-teams mode, the host-decided / first-finished winner gets a
   // gradient highlight.
   winnerTeamId?: string | null;
+  // Event code so we can render a "back to rounds" button on each result view.
+  code?: string;
 }
 
 function formatTime(ms: number | null): string {
@@ -87,6 +90,7 @@ export function RoundResults({
   players,
   mode,
   winnerTeamId,
+  code,
 }: Props) {
   const def = CHALLENGES[challenge];
 
@@ -100,22 +104,45 @@ export function RoundResults({
         roundStartedAt={roundStartedAt}
         entry={mine}
         players={players}
+        code={code}
       />
     );
   }
 
   const sorted = sortEntries(entries, challenge);
+  const winnerEntry =
+    winnerTeamId !== undefined && winnerTeamId !== null
+      ? entries.find((e) => e.team.id === winnerTeamId)
+      : null;
+  const winnerPrimary = winnerEntry
+    ? primaryLabel(winnerEntry, challenge, threshold, roundStartedAt)
+    : null;
 
   return (
-    <div className="flex flex-col gap-3 p-4">
+    <div className="flex flex-col gap-3 p-4 overflow-y-auto">
       <div className="text-center mb-2">
-        <div className="text-5xl mb-2">{def.emoji}</div>
-        <div className="font-display text-2xl font-extrabold tracking-widest">
+        <div className="text-6xl mb-2">{def.emoji}</div>
+        <div className="font-display text-3xl font-extrabold tracking-widest">
           ROUND COMPLETE
         </div>
         <div className="text-xs uppercase tracking-widest opacity-70 mt-1">
           {def.label}
         </div>
+        {winnerEntry ? (
+          <div className="mt-4 mx-auto inline-block px-4 py-3 rounded-2xl bg-gradient-done text-white shadow-[0_0_24px_rgba(255,140,66,0.45)]">
+            <div className="text-[10px] uppercase tracking-[0.3em] opacity-90">
+              and the winner is…
+            </div>
+            <div className="font-display text-xl font-extrabold mt-1">
+              🏆 {winnerEntry.team.emoji} {winnerEntry.team.name}
+            </div>
+            {winnerPrimary && (
+              <div className="text-xs uppercase tracking-widest opacity-90 mt-1 tabular-nums">
+                {winnerPrimary}
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
       {sorted.map((entry, idx) => (
         <TeamResultRow
@@ -130,8 +157,35 @@ export function RoundResults({
           players={players}
         />
       ))}
+      {code ? (
+        <Link
+          href={`/e/${code}/play`}
+          className="mt-3 w-full text-center py-4 rounded-2xl bg-gradient-party font-display text-base font-extrabold tracking-widest"
+        >
+          ← BACK TO ROUNDS
+        </Link>
+      ) : null}
     </div>
   );
+}
+
+function primaryLabel(
+  entry: ResultEntry,
+  challenge: ChallengeId,
+  threshold: number,
+  roundStartedAt: number | null,
+): string {
+  const def = CHALLENGES[challenge];
+  if (challenge === "north") {
+    const guesses = entry.guesses ?? [];
+    if (guesses.length === 0) return "no guesses";
+    return `${northAvgError(entry).toFixed(0)}° avg error`;
+  }
+  if (entry.completedAt !== null) {
+    const ms = timeTaken(entry, roundStartedAt);
+    return `finished in ${formatTime(ms)}`;
+  }
+  return def.formatProgress(entry.value, threshold);
 }
 
 // ---------- My team focal card (round still live) ----------
@@ -142,12 +196,14 @@ function MyTeamCard({
   roundStartedAt,
   entry,
   players,
+  code,
 }: {
   challenge: ChallengeId;
   threshold: number;
   roundStartedAt: number | null;
   entry: ResultEntry;
   players: Record<string, Player>;
+  code?: string;
 }) {
   const def = CHALLENGES[challenge];
 
@@ -186,6 +242,14 @@ function MyTeamCard({
             ? "wait for host to end the round and crown the winner."
             : "all teammates need to guess."}
         </div>
+        {code ? (
+          <Link
+            href={`/e/${code}/play`}
+            className="mt-6 px-6 py-3 rounded-2xl bg-black/30 text-white font-bold tracking-widest text-xs uppercase border border-white/30"
+          >
+            ← back to rounds
+          </Link>
+        ) : null}
       </div>
     );
   }
@@ -210,6 +274,14 @@ function MyTeamCard({
       <div className="mt-6 text-[11px] opacity-90 max-w-xs">
         nice work. host will end the round once they’re ready.
       </div>
+      {code ? (
+        <Link
+          href={`/e/${code}/play`}
+          className="mt-6 px-6 py-3 rounded-2xl bg-black/30 text-white font-bold tracking-widest text-xs uppercase border border-white/30"
+        >
+          ← back to rounds
+        </Link>
+      ) : null}
     </div>
   );
 }

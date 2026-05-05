@@ -40,7 +40,7 @@ export function RoundCard({
     case "past":
       toneClasses = isMyTeamWinner
         ? "bg-gradient-done text-white"
-        : "bg-bg-card text-white opacity-70";
+        : "bg-bg-card text-white border border-white/10";
       trailing = state.winner ? (
         <div className="flex items-center gap-2">
           <span className="text-xl">🥇</span>
@@ -70,8 +70,8 @@ export function RoundCard({
       );
       break;
     case "future":
-      toneClasses = "bg-bg-card/40 text-white opacity-40";
-      trailing = <div className="text-xl opacity-60">🔒</div>;
+      toneClasses = "bg-bg-deep text-white/80 border border-white/10";
+      trailing = <div className="text-xl">🔒</div>;
       break;
   }
 
