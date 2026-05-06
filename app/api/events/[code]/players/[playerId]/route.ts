@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isHostAuthorized } from "@/lib/auth/host";
 import {
   assignPlayerToTeam,
+  deletePlayer,
   getPlayerByIdAndEvent,
   renamePlayer,
 } from "@/lib/db/queries";
@@ -121,4 +122,47 @@ export async function PATCH(
   }
 
   return NextResponse.json({ player });
+}
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: { code: string; playerId: string } },
+): Promise<NextResponse<{ ok: true } | { error: string }>> {
+  if (!(await isHostAuthorized())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const code = normalizeEventCode(params.code);
+  if (!code) {
+    return NextResponse.json({ error: "Invalid event code" }, { status: 400 });
+  }
+
+  const result = await deletePlayer({ code, playerId: params.playerId });
+  if ("error" in result) {
+    if (result.error === "not-found") {
+      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+    }
+    return NextResponse.json(
+      { error: "Player not in this event" },
+      { status: 404 },
+    );
+  }
+
+  // Best-effort nudge so any subscribed lobby / host monitor pages refetch
+  // their roster and drop the deleted player. Reuses team-assigned with a
+  // null teamId — receivers already treat that as "this player needs to be
+  // re-fetched". The host page updates its own state via the fetcher's
+  // onChange callback.
+  try {
+    await publishFromServer(code, {
+      kind: "team-assigned",
+      playerId: params.playerId,
+      teamId: null,
+      ts: Date.now(),
+    });
+  } catch (err) {
+    console.error("[player-delete] PubNub publish failed", err);
+  }
+
+  return NextResponse.json({ ok: true });
 }
