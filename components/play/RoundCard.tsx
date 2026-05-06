@@ -29,6 +29,9 @@ interface Props {
   // current-decided states). When provided, the card becomes tappable and
   // toggles a per-team score breakdown.
   expandable?: React.ReactNode;
+  // When true, future rounds reveal their real challenge + threshold instead
+  // of the locked "???" placeholder. Host-only sneak peek.
+  revealLocked?: boolean;
 }
 
 const ORDINAL_GLYPH = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
@@ -53,6 +56,12 @@ function thresholdLabel(challenge: ChallengeId, threshold: number): string {
       return `target ${(threshold / 1000).toFixed(0)}s`;
     case "trivia":
       return "most correct wins";
+    case "interleave":
+      return threshold > 0
+        ? `${threshold.toLocaleString()} total reps`
+        : "spin & step segments";
+    case "flappy":
+      return `${threshold}m team total`;
     case "punishment":
       return "non-scoring";
   }
@@ -69,6 +78,7 @@ export function RoundCard({
   myMedal,
   children,
   expandable,
+  revealLocked,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const def = CHALLENGES[challenge];
@@ -146,9 +156,15 @@ export function RoundCard({
     case "future":
       toneClasses = isPunishment
         ? "bg-bg-deep text-white/80 border border-accent-pink/30"
-        : "bg-bg-deep text-white/80 border border-white/10";
+        : revealLocked
+          ? "bg-bg-deep text-white/80 border border-accent-orange/30"
+          : "bg-bg-deep text-white/80 border border-white/10";
       trailing = isPunishment ? (
         <div className="text-xl">💀</div>
+      ) : revealLocked ? (
+        <div className="text-[10px] uppercase tracking-widest font-extrabold text-accent-orange">
+          host
+        </div>
       ) : (
         <div className="text-xl">🔒</div>
       );
@@ -160,10 +176,9 @@ export function RoundCard({
   void isMyTeamWinner;
 
   const isLocked = state.kind === "future";
-  const subtitle = isLocked
-    ? isPunishment
-      ? `Round ${ordinal} · 💀 PUNISHMENT INCOMING`
-      : `Round ${ordinal} · ???`
+  const showRealDetails = !isLocked || isPunishment || revealLocked;
+  const subtitle = !showRealDetails
+    ? `Round ${ordinal} · ???`
     : isPunishment
       ? `💀 Punishment · ${thresholdLabel(challenge, threshold)}`
       : `${def.label} · ${thresholdLabel(challenge, threshold)}`;
@@ -173,12 +188,12 @@ export function RoundCard({
       <div className="font-display font-extrabold text-2xl opacity-70 w-7 text-center tabular-nums">
         {glyph}
       </div>
-      <div className="text-3xl">{isLocked && !isPunishment ? "❓" : def.emoji}</div>
+      <div className="text-3xl">{showRealDetails ? def.emoji : "❓"}</div>
       <div className="flex-1 min-w-0">
         <div className="font-display font-extrabold tracking-wider uppercase text-sm truncate">
           {subtitle}
         </div>
-        {!isLocked && (
+        {showRealDetails && (
           <div className="text-[11px] opacity-60 truncate">{def.description}</div>
         )}
       </div>

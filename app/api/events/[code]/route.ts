@@ -22,8 +22,17 @@ const ChallengeIdSchema = z.enum([
   "north",
   "time-guess",
   "trivia",
+  "interleave",
+  "flappy",
   "punishment",
 ]);
+
+const InterleaveSegmentSchema = z
+  .object({
+    kind: z.enum(["spin", "steps"]),
+    count: z.number().int().positive().max(10000),
+  })
+  .strict();
 
 // Permissive: incomplete rows (empty prompt / fewer than 2 non-blank
 // choices) are dropped server-side by coerceTriviaQuestions before save.
@@ -46,6 +55,10 @@ const RoundConfigSchema = z
     // Only meaningful for `challenge === "punishment"`. Server-side
     // coerceRounds backfills a default if missing.
     message: z.string().max(500).optional(),
+    // Only meaningful for `challenge === "interleave"`. Each segment is
+    // either a spin-rotations or step-count chunk; the team grinds through
+    // them in sequence.
+    segments: z.array(InterleaveSegmentSchema).max(20).optional(),
   })
   .strict();
 

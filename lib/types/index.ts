@@ -10,6 +10,13 @@ export type ChallengeId =
   | "north"
   | "time-guess"
   | "trivia"
+  // Composite round: an ordered list of "spin N" / "step N" segments the team
+  // must clear in sequence. Each segment is team-total; finishing the last
+  // segment finishes the round. See `RoundConfig.segments`.
+  | "interleave"
+  // Flappy-Bird-style mic game: yell to flap, dodge pipes. Each player runs
+  // their own session locally; meters traveled are summed across the team.
+  | "flappy"
   // Not really a challenge — a "punishment line" the host drops between
   // rounds. When live, the team currently in last place gets called out on a
   // fullscreen takeover with the punishment message; host marks complete.
@@ -217,6 +224,13 @@ export interface TriviaQuestion {
   correctIndex: number;
 }
 
+// A single segment of an "interleave" round. Each segment is a team-total
+// chunk that must be cleared before the next segment unlocks.
+export interface InterleaveSegment {
+  kind: "spin" | "steps";
+  count: number;
+}
+
 // One slot in the event's round list. The host can drag-drop these around
 // and add multiple of the same challenge type with different thresholds.
 export interface RoundConfig {
@@ -228,6 +242,10 @@ export interface RoundConfig {
   // Only populated for `challenge === "punishment"`. The text shown on the
   // fullscreen takeover when the punishment is live.
   message?: string;
+  // Only populated for `challenge === "interleave"`. Ordered segments of
+  // spin/steps targets the team grinds through in sequence. The round's
+  // overall threshold is auto-derived as the sum of segment counts.
+  segments?: InterleaveSegment[];
 }
 
 // A reusable trivia question set the host can save and apply to any trivia

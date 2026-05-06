@@ -359,6 +359,10 @@ export function JourneyView({ code, myPlayerId }: Props) {
           <CountdownOverlay
             startsAt={event.currentRoundStartsAt}
             challenge={event.rounds[currentIdx].challenge}
+            threshold={
+              event.rounds[currentIdx].threshold ??
+              CHALLENGES[event.rounds[currentIdx].challenge].defaultThreshold
+            }
             onDone={() => {
               setShowCountdown(false);
               router.replace(`/e/${code}/play/${currentIdx}`);
@@ -408,10 +412,11 @@ export function JourneyView({ code, myPlayerId }: Props) {
           </>
         )}
 
-        {/* Big END / RELEASE affordance — host only. Label changes once all
-            rounds are decided so the host knows tapping it locks in the
-            scoreboard. */}
-        {isHost && event.status === "active" && (
+        {/* RELEASE FINAL SCORES — host only, only once every round is
+            decided. The earlier "END EVENT NOW" affordance is gone; the host
+            advances the event by ending each round, not by short-circuiting
+            the whole heptathlon. */}
+        {isHost && event.status === "active" && pendingRelease && (
           <div className="mt-2">
             <EndHeptathlonControls
               teams={teamList}
@@ -419,7 +424,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 standings.map((s) => [s.team.id, s.points]),
               )}
               onEnd={handleEndEvent}
-              releaseMode={pendingRelease}
+              releaseMode
             />
           </div>
         )}
@@ -592,6 +597,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 isMyTeamWinner={isMyTeamWinner}
                 myMedal={myMedal}
                 expandable={expandable}
+                revealLocked={isHost}
               >
                 {hostControls}
               </RoundCard>

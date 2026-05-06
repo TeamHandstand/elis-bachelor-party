@@ -21,6 +21,8 @@ const challengeIdSchema = z.enum([
   "spin",
   "north",
   "time-guess",
+  "interleave",
+  "flappy",
 ]);
 
 const snapshotSchema = z

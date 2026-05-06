@@ -2,6 +2,7 @@ import type {
   ChallengeDef,
   ChallengeId,
   EventConfig,
+  InterleaveSegment,
   RoundConfig,
   TriviaQuestion,
 } from "@/lib/types";
@@ -107,6 +108,33 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
       "Whole team picks answers together (live synced) and submits one block. Most correct wins; tie → earliest submit.",
     formatProgress: (v) => `${Math.floor(v)} correct`,
   },
+  interleave: {
+    id: "interleave",
+    label: "Spin & Stomp",
+    emoji: "🌀👟",
+    // Threshold is auto-derived as the sum of all segment counts. Stored as
+    // 0 here so the host UI doesn't ask for it; the segment editor controls
+    // the real total.
+    defaultThreshold: 0,
+    unit: "segments",
+    aggregation: "team-total",
+    description:
+      "Alternating spin/step segments. Clear them in order — earliest finisher wins.",
+    formatProgress: (v, t) =>
+      `${Math.min(Math.floor(v), t).toLocaleString()} / ${t.toLocaleString()}`,
+  },
+  flappy: {
+    id: "flappy",
+    label: "Scream Bird",
+    emoji: "🐦",
+    // 200m = roughly 30s of decent flying for a moderately good player.
+    defaultThreshold: 200,
+    unit: "meters",
+    aggregation: "team-total",
+    description:
+      "Flappy Bird, but yelling makes the bird fly. Total team meters wins.",
+    formatProgress: (v, t) => `${Math.floor(v)} / ${t} m`,
+  },
   punishment: {
     id: "punishment",
     label: "Punishment",
@@ -159,6 +187,10 @@ export function challengeCommand(id: ChallengeId, threshold: number): string {
     }
     case "trivia":
       return `Pick answers together — most correct wins! (Tie → earliest submit.)`;
+    case "interleave":
+      return `Clear every spin & step segment in order — first team done wins!`;
+    case "flappy":
+      return `Yell to flap, dodge pipes — fly ${threshold}m as a team!`;
     case "punishment":
       return `Losing team — your time has come.`;
   }
@@ -174,6 +206,8 @@ export const CHALLENGE_ORDER: ChallengeId[] = [
   "north",
   "time-guess",
   "trivia",
+  "interleave",
+  "flappy",
 ];
 
 /**
@@ -232,10 +266,16 @@ export function challengeForRound(
  * Whether the challenge is one whose threshold is host-tunable. Trivia and
  * north are the exceptions: trivia is scored by correct count vs. its own
  * embedded question list, north by avg angular error with one guess each.
- * Punishment has no threshold either — it's a non-scoring round.
+ * Punishment has no threshold either — it's a non-scoring round. Interleave
+ * derives its threshold from the sum of segment counts.
  */
 export function challengeHasThreshold(id: ChallengeId): boolean {
-  return id !== "north" && id !== "trivia" && id !== "punishment";
+  return (
+    id !== "north" &&
+    id !== "trivia" &&
+    id !== "punishment" &&
+    id !== "interleave"
+  );
 }
 
 /**
@@ -245,6 +285,68 @@ export function challengeHasThreshold(id: ChallengeId): boolean {
  */
 export function isPunishmentRound(id: ChallengeId): boolean {
   return id === "punishment";
+}
+
+// ---------------------------------------------------------------------------
+// Interleave helpers
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_INTERLEAVE_SEGMENTS: InterleaveSegment[] = [
+  { kind: "spin", count: 50 },
+  { kind: "steps", count: 200 },
+  { kind: "spin", count: 30 },
+  { kind: "steps", count: 300 },
+];
+
+/** Sum of every segment's count. Used as the round's effective threshold. */
+export function interleaveTotal(segments: InterleaveSegment[]): number {
+  return segments.reduce((s, seg) => s + Math.max(0, seg.count), 0);
+}
+
+/**
+ * Find which segment a team is currently working on given accumulated value.
+ * Returns the active segment, its 0-based index, and progress within it.
+ * If the team has finished every segment, returns null.
+ */
+export function locateInterleaveSegment(
+  segments: InterleaveSegment[],
+  accumulated: number,
+): {
+  index: number;
+  segment: InterleaveSegment;
+  segmentValue: number; // value within current segment
+} | null {
+  let consumed = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const next = consumed + seg.count;
+    if (accumulated < next) {
+      return {
+        index: i,
+        segment: seg,
+        segmentValue: Math.max(0, accumulated - consumed),
+      };
+    }
+    consumed = next;
+  }
+  return null;
+}
+
+function coerceInterleaveSegments(raw: unknown): InterleaveSegment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: InterleaveSegment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as { kind?: unknown; count?: unknown };
+    if (o.kind !== "spin" && o.kind !== "steps") continue;
+    const count =
+      typeof o.count === "number" && Number.isFinite(o.count) && o.count > 0
+        ? Math.floor(o.count)
+        : 0;
+    if (count === 0) continue;
+    out.push({ kind: o.kind, count });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +504,16 @@ export function coerceRounds(raw: unknown): RoundConfig[] {
           typeof msg === "string" && msg.trim()
             ? msg
             : DEFAULT_PUNISHMENT_MESSAGE;
+      }
+      if (challenge === "interleave") {
+        const segs = coerceInterleaveSegments(
+          (item as { segments?: unknown }).segments,
+        );
+        round.segments = segs.length > 0 ? segs : DEFAULT_INTERLEAVE_SEGMENTS;
+        // Threshold for an interleave round is always the sum of segment
+        // counts; the host UI doesn't store a separate value. Recompute it
+        // here to keep the persisted shape canonical.
+        round.threshold = interleaveTotal(round.segments);
       }
       out.push(round);
     }

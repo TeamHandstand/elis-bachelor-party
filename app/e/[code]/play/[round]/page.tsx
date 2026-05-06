@@ -28,6 +28,8 @@ import { SpinView } from "@/components/challenge/SpinView";
 import { NorthView } from "@/components/challenge/NorthView";
 import { TimeGuessView } from "@/components/challenge/TimeGuessView";
 import { TriviaView } from "@/components/challenge/TriviaView";
+import { InterleaveView } from "@/components/challenge/InterleaveView";
+import { FlappyView } from "@/components/challenge/FlappyView";
 
 export default function ChallengePage() {
   const router = useRouter();
@@ -273,6 +275,12 @@ export default function ChallengePage() {
     case "trivia":
       view = <TriviaView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
       break;
+    case "interleave":
+      view = <InterleaveView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
+      break;
+    case "flappy":
+      view = <FlappyView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
+      break;
   }
 
   const progressLabel = myCur
@@ -350,6 +358,7 @@ export default function ChallengePage() {
         <CountdownOverlay
           startsAt={event.currentRoundStartsAt}
           challenge={challenge}
+          threshold={threshold}
           onDone={() => {
             /* fall through to challenge view */
           }}

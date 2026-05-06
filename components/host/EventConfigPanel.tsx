@@ -19,6 +19,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type {
   ChallengeId,
   EventConfig,
+  InterleaveSegment,
   RoundConfig,
   TriviaQuestion,
 } from "@/lib/types";
@@ -26,8 +27,10 @@ import type { UpdateEventRequest } from "@/lib/api/contract";
 import {
   CHALLENGE_ORDER,
   CHALLENGES,
+  DEFAULT_INTERLEAVE_SEGMENTS,
   DEFAULT_PUNISHMENT_MESSAGE,
   challengeHasThreshold,
+  interleaveTotal,
 } from "@/lib/challenges";
 import { patchEvent } from "./_fetch";
 import { TriviaRoundModal } from "./TriviaRoundModal";
@@ -141,6 +144,13 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
         challenge,
         threshold: 0,
         message: DEFAULT_PUNISHMENT_MESSAGE,
+      };
+    } else if (challenge === "interleave") {
+      const segs = [...DEFAULT_INTERLEAVE_SEGMENTS];
+      round = {
+        challenge,
+        threshold: interleaveTotal(segs),
+        segments: segs,
       };
     } else {
       round = { challenge, threshold: def.defaultThreshold };
@@ -290,8 +300,29 @@ function SortableRoundRow({
   const showThreshold = challengeHasThreshold(round.challenge);
   const isTrivia = round.challenge === "trivia";
   const isPunishment = round.challenge === "punishment";
+  const isInterleave = round.challenge === "interleave";
   const triviaCount = round.questions?.length ?? 0;
   const selectId = useId();
+
+  function changeChallenge(next: ChallengeId) {
+    if (next === round.challenge) return;
+    const def = CHALLENGES[next];
+    const patch: Partial<RoundConfig> = {
+      challenge: next,
+      threshold: def.defaultThreshold,
+      // Strip type-specific fields the new challenge doesn't use.
+      questions: undefined,
+      message: undefined,
+      segments: undefined,
+    };
+    if (next === "trivia") patch.questions = [];
+    if (next === "punishment") patch.message = DEFAULT_PUNISHMENT_MESSAGE;
+    if (next === "interleave") {
+      patch.segments = [...DEFAULT_INTERLEAVE_SEGMENTS];
+      patch.threshold = interleaveTotal(patch.segments);
+    }
+    onChange(patch);
+  }
 
   if (isPunishment) {
     return (
@@ -349,6 +380,30 @@ function SortableRoundRow({
       style={style}
       className="py-3 flex flex-wrap items-center gap-3"
     >
+      {isInterleave ? (
+        <div className="w-full flex flex-col gap-3">
+          <InterleaveRowHead
+            ordinal={ordinal}
+            attributes={attributes}
+            listeners={listeners}
+            selectId={selectId}
+            challenge={round.challenge}
+            description={def.description}
+            onChangeChallenge={changeChallenge}
+            onRemove={onRemove}
+          />
+          <InterleaveSegmentEditor
+            segments={round.segments ?? DEFAULT_INTERLEAVE_SEGMENTS}
+            onChange={(segs) =>
+              onChange({
+                segments: segs,
+                threshold: interleaveTotal(segs),
+              })
+            }
+          />
+        </div>
+      ) : (
+        <>
       <button
         type="button"
         {...attributes}
@@ -369,9 +424,7 @@ function SortableRoundRow({
         <select
           id={selectId}
           value={round.challenge}
-          onChange={(e) =>
-            onChange({ challenge: e.target.value as ChallengeId })
-          }
+          onChange={(e) => changeChallenge(e.target.value as ChallengeId)}
           className="rounded-lg bg-bg-deep border border-white/10 px-3 py-2 outline-none focus:border-accent-pink font-bold"
         >
           {CHALLENGE_ORDER.map((id) => (
@@ -383,7 +436,11 @@ function SortableRoundRow({
         <div className="text-xs opacity-60">{def.description}</div>
       </div>
       <div className="flex items-center gap-2">
-        {isTrivia ? (
+        {isInterleave ? (
+          <div className="text-xs opacity-60 w-48 text-right">
+            edit segments below ↓
+          </div>
+        ) : isTrivia ? (
           <button
             type="button"
             onClick={onEditTrivia}
@@ -440,6 +497,198 @@ function SortableRoundRow({
       >
         ✕
       </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function InterleaveRowHead({
+  ordinal,
+  attributes,
+  listeners,
+  selectId,
+  challenge,
+  description,
+  onChangeChallenge,
+  onRemove,
+}: {
+  ordinal: number;
+  attributes: ReturnType<typeof useSortable>["attributes"];
+  listeners: ReturnType<typeof useSortable>["listeners"];
+  selectId: string;
+  challenge: ChallengeId;
+  description: string;
+  onChangeChallenge: (id: ChallengeId) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label="Drag to reorder"
+        className="cursor-grab touch-none px-2 py-1 rounded-lg bg-bg-deep border border-white/10 text-sm font-bold opacity-70 hover:opacity-100"
+      >
+        ⋮⋮
+      </button>
+      <div className="font-display font-extrabold text-lg opacity-60 w-6 text-center tabular-nums">
+        {ordinal}
+      </div>
+      <span className="text-2xl">{CHALLENGES[challenge].emoji}</span>
+      <div className="flex flex-col gap-1 flex-1 min-w-[180px]">
+        <label htmlFor={selectId} className="sr-only">
+          Challenge type
+        </label>
+        <select
+          id={selectId}
+          value={challenge}
+          onChange={(e) => onChangeChallenge(e.target.value as ChallengeId)}
+          className="rounded-lg bg-bg-deep border border-white/10 px-3 py-2 outline-none focus:border-accent-pink font-bold"
+        >
+          {CHALLENGE_ORDER.map((id) => (
+            <option key={id} value={id}>
+              {CHALLENGES[id].emoji} {CHALLENGES[id].label}
+            </option>
+          ))}
+        </select>
+        <div className="text-xs opacity-60">{description}</div>
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove round"
+        className="px-3 py-2 rounded-lg bg-bg-deep border border-white/10 text-sm font-bold opacity-70 hover:opacity-100 hover:text-accent-pink"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+function InterleaveSegmentEditor({
+  segments,
+  onChange,
+}: {
+  segments: InterleaveSegment[];
+  onChange: (segs: InterleaveSegment[]) => void;
+}) {
+  function update(idx: number, patch: Partial<InterleaveSegment>) {
+    const next = segments.map((s, i) => (i === idx ? { ...s, ...patch } : s));
+    onChange(next);
+  }
+  function remove(idx: number) {
+    onChange(segments.filter((_, i) => i !== idx));
+  }
+  function add(kind: InterleaveSegment["kind"]) {
+    const last = segments[segments.length - 1];
+    const fallback = kind === "spin" ? 30 : 200;
+    const count = last && last.kind === kind ? last.count : fallback;
+    onChange([...segments, { kind, count }]);
+  }
+  function move(idx: number, dir: -1 | 1) {
+    const j = idx + dir;
+    if (j < 0 || j >= segments.length) return;
+    const next = [...segments];
+    [next[idx], next[j]] = [next[j], next[idx]];
+    onChange(next);
+  }
+  const total = interleaveTotal(segments);
+
+  return (
+    <div className="rounded-xl bg-bg-deep border border-white/10 p-3 space-y-2">
+      <div className="flex items-center justify-between text-[11px] uppercase tracking-widest font-bold">
+        <span className="opacity-60">segments</span>
+        <span className="opacity-80">
+          total: {total.toLocaleString()} reps
+        </span>
+      </div>
+      {segments.length === 0 ? (
+        <div className="text-xs opacity-60 py-2">
+          No segments yet. Add at least one ↓
+        </div>
+      ) : (
+        <ol className="space-y-2">
+          {segments.map((seg, idx) => (
+            <li
+              key={idx}
+              className="flex items-center gap-2 bg-bg-card rounded-lg px-2 py-1.5"
+            >
+              <span className="font-display font-extrabold tabular-nums opacity-60 w-5 text-center">
+                {idx + 1}
+              </span>
+              <select
+                value={seg.kind}
+                onChange={(e) =>
+                  update(idx, {
+                    kind: e.target.value as InterleaveSegment["kind"],
+                  })
+                }
+                className="rounded-lg bg-bg-deep border border-white/10 px-2 py-1.5 text-sm font-bold"
+              >
+                <option value="spin">🌀 Spin</option>
+                <option value="steps">👟 Steps</option>
+              </select>
+              <input
+                type="number"
+                min={1}
+                value={seg.count}
+                onChange={(e) =>
+                  update(idx, { count: Math.max(0, Number(e.target.value) || 0) })
+                }
+                className="w-24 rounded-lg bg-bg-deep border border-white/10 px-2 py-1.5 text-right text-sm tabular-nums"
+              />
+              <span className="text-[11px] opacity-60 w-12">
+                {seg.kind === "spin" ? "spins" : "steps"}
+              </span>
+              <div className="flex-1" />
+              <button
+                type="button"
+                onClick={() => move(idx, -1)}
+                disabled={idx === 0}
+                aria-label="Move up"
+                className="px-2 py-1 rounded-md bg-bg-deep border border-white/10 text-xs font-bold opacity-70 disabled:opacity-30"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => move(idx, 1)}
+                disabled={idx === segments.length - 1}
+                aria-label="Move down"
+                className="px-2 py-1 rounded-md bg-bg-deep border border-white/10 text-xs font-bold opacity-70 disabled:opacity-30"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(idx)}
+                aria-label="Remove segment"
+                className="px-2 py-1 rounded-md bg-bg-deep border border-white/10 text-xs font-bold opacity-70 hover:text-accent-pink"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => add("spin")}
+          className="flex-1 px-3 py-2 rounded-lg bg-bg-deep border border-white/10 hover:border-accent-pink text-xs font-extrabold tracking-wider"
+        >
+          ➕ 🌀 Spin segment
+        </button>
+        <button
+          type="button"
+          onClick={() => add("steps")}
+          className="flex-1 px-3 py-2 rounded-lg bg-bg-deep border border-white/10 hover:border-accent-pink text-xs font-extrabold tracking-wider"
+        >
+          ➕ 👟 Step segment
+        </button>
+      </div>
     </div>
   );
 }
