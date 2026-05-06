@@ -58,7 +58,7 @@ const PatchSchema = z
           .object({
             id: z.string().uuid(),
             name: z.string().max(80).optional(),
-            emoji: z.string().max(8).optional(),
+            emoji: z.string().max(32).optional(),
             color: z.string().max(120).optional(),
           })
           .strict(),

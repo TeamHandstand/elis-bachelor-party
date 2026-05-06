@@ -13,7 +13,7 @@ import type { UpdateTeamResponse } from "@/lib/api/contract";
 const PatchSchema = z
   .object({
     name: z.string().trim().min(1).max(40).optional(),
-    emoji: z.string().trim().min(1).max(8).optional(),
+    emoji: z.string().trim().min(1).max(32).optional(),
     deviceId: z.string().min(1).max(120).optional(),
   })
   .strict();

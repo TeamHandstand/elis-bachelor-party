@@ -274,6 +274,115 @@ export async function updateEvent(
   };
 }
 
+/**
+ * Duplicate an existing event into a fresh lobby. Always copies title,
+ * groomName, and rounds. Optionally copies teams and players (with team
+ * assignments preserved via an old→new team-id map). Progress, winners,
+ * round state, and host-player assignment are intentionally NOT copied —
+ * the new event starts in 'lobby' status.
+ */
+export async function duplicateEvent(input: {
+  sourceCode: string;
+  copyTeamsAndPlayers: boolean;
+}): Promise<{ event: EventConfig; teams: Team[]; players: Player[] } | null> {
+  const sourceRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.sourceCode))
+    .limit(1);
+  const source = sourceRows[0];
+  if (!source) return null;
+
+  const newTitle = source.title.endsWith(" (copy)")
+    ? source.title
+    : `${source.title} (copy)`;
+
+  let newEventRow: EventRow | null = null;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateEventCode();
+    try {
+      const inserted = await db
+        .insert(events)
+        .values({
+          code,
+          title: newTitle,
+          groomName: source.groomName,
+          challenges: source.challenges,
+          status: "lobby",
+        })
+        .returning();
+      if (inserted[0]) {
+        newEventRow = inserted[0];
+        break;
+      }
+    } catch (err) {
+      lastErr = err;
+      const pgCode = (err as { code?: string } | null)?.code;
+      if (pgCode !== "23505") throw err;
+    }
+  }
+  if (!newEventRow) throw lastErr ?? new Error("Failed to allocate unique event code");
+
+  let copiedTeams: Team[] = [];
+  let copiedPlayers: Player[] = [];
+
+  if (input.copyTeamsAndPlayers) {
+    const sourceTeams = await db
+      .select()
+      .from(teams)
+      .where(eq(teams.eventId, source.id));
+
+    if (sourceTeams.length > 0) {
+      const insertedTeams = await db
+        .insert(teams)
+        .values(
+          sourceTeams.map((t) => ({
+            eventId: newEventRow!.id,
+            name: t.name,
+            emoji: t.emoji,
+            color: t.color,
+          })),
+        )
+        .returning();
+
+      // Map old team id → new team id by index (insert order matches values order).
+      const teamIdMap = new Map<string, string>();
+      sourceTeams.forEach((t, i) => {
+        const newRow = insertedTeams[i];
+        if (newRow) teamIdMap.set(t.id, newRow.id);
+      });
+      copiedTeams = insertedTeams.map(teamRowToTeam);
+
+      const sourcePlayers = await db
+        .select()
+        .from(players)
+        .where(eq(players.eventId, source.id));
+
+      if (sourcePlayers.length > 0) {
+        const insertedPlayers = await db
+          .insert(players)
+          .values(
+            sourcePlayers.map((p) => ({
+              eventId: newEventRow!.id,
+              teamId: p.teamId ? teamIdMap.get(p.teamId) ?? null : null,
+              name: p.name,
+              deviceId: p.deviceId,
+            })),
+          )
+          .returning();
+        copiedPlayers = insertedPlayers.map(playerRowToPlayer);
+      }
+    }
+  }
+
+  return {
+    event: eventRowToConfig(newEventRow),
+    teams: copiedTeams,
+    players: copiedPlayers,
+  };
+}
+
 export async function deleteEvent(code: string): Promise<boolean> {
   const result = await db.delete(events).where(eq(events.code, code)).returning({
     id: events.id,

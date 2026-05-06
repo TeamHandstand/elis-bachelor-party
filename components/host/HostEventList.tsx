@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { deleteEvent, listEvents } from "./_fetch";
+import { deleteEvent, duplicateEvent, listEvents } from "./_fetch";
 import type { ListEventsResponse } from "@/lib/api/contract";
+import { DuplicateEventModal } from "./DuplicateEventModal";
 
 interface Props {
   initial: ListEventsResponse["events"];
@@ -25,6 +26,11 @@ export default function HostEventList({ initial }: Props) {
   const [events, setEvents] = useState(initial);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateTarget, setDuplicateTarget] = useState<
+    ListEventsResponse["events"][number] | null
+  >(null);
+  const [duplicateBusy, setDuplicateBusy] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +52,23 @@ export default function HostEventList({ initial }: Props) {
       clearInterval(interval);
     };
   }, [router]);
+
+  async function handleDuplicateConfirm(opts: {
+    copyTeamsAndPlayers: boolean;
+  }) {
+    if (!duplicateTarget || duplicateBusy) return;
+    setDuplicateBusy(true);
+    setDuplicateError(null);
+    try {
+      const { event } = await duplicateEvent(duplicateTarget.code, opts);
+      router.push(`/host/${event.code}`);
+    } catch (err) {
+      setDuplicateError(
+        err instanceof Error ? err.message : "Couldn't duplicate event",
+      );
+      setDuplicateBusy(false);
+    }
+  }
 
   async function handleDelete(ev: ListEventsResponse["events"][number]) {
     const label = ev.title || ev.code;
@@ -161,8 +184,20 @@ export default function HostEventList({ initial }: Props) {
                 <button
                   type="button"
                   disabled={isBusy}
+                  onClick={() => {
+                    setDuplicateError(null);
+                    setDuplicateTarget(ev);
+                  }}
+                  className="ml-auto px-3 py-1.5 rounded-xl bg-bg-deep border border-white/15 text-xs font-bold hover:border-accent-orange/60 disabled:opacity-50"
+                  aria-label={`Duplicate ${ev.title || ev.code}`}
+                >
+                  ⧉ Duplicate
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy}
                   onClick={() => handleDelete(ev)}
-                  className="ml-auto px-3 py-1.5 rounded-xl bg-bg-deep border border-accent-pink/40 text-xs font-bold text-accent-pink hover:bg-accent-pink/10 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl bg-bg-deep border border-accent-pink/40 text-xs font-bold text-accent-pink hover:bg-accent-pink/10 disabled:opacity-50"
                   aria-label={`Delete ${ev.title || ev.code}`}
                 >
                   {isBusy ? "deleting…" : "🗑 Delete"}
@@ -172,6 +207,21 @@ export default function HostEventList({ initial }: Props) {
           );
         })}
       </ul>
+
+      {duplicateTarget ? (
+        <DuplicateEventModal
+          eventLabel={duplicateTarget.title || duplicateTarget.code}
+          busy={duplicateBusy}
+          error={duplicateError}
+          onClose={() => {
+            if (!duplicateBusy) {
+              setDuplicateTarget(null);
+              setDuplicateError(null);
+            }
+          }}
+          onConfirm={handleDuplicateConfirm}
+        />
+      ) : null}
     </div>
   );
 }

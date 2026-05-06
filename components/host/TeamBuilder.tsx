@@ -31,7 +31,6 @@ interface Props {
 
 const POOL_ID = "__pool__";
 const NEW_TEAM_ID = "__new_team__";
-const EMOJI_OPTIONS = ["🍕", "🍝", "🍍", "🌭", "🍔", "🌮", "🍣", "🥨", "🍩", "🍦", "🥑", "🥩", "🥟", "🍤", "🍪"];
 
 export default function TeamBuilder({ event, teams, players, onChange }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -413,9 +412,26 @@ function TeamBox({
   const { isOver, setNodeRef } = useDroppable({ id: team.id });
   const [picking, setPicking] = useState(false);
   const [name, setName] = useState(team.name);
+  const [emojiDraft, setEmojiDraft] = useState(team.emoji);
+  const emojiInputRef = useRef<HTMLInputElement | null>(null);
 
   // Sync if external rename occurs (e.g., from server confirmation).
   useEffect(() => setName(team.name), [team.name]);
+  useEffect(() => setEmojiDraft(team.emoji), [team.emoji]);
+
+  useEffect(() => {
+    if (picking) {
+      emojiInputRef.current?.focus();
+      emojiInputRef.current?.select();
+    }
+  }, [picking]);
+
+  function commitEmoji() {
+    const next = emojiDraft.trim();
+    if (next && next !== team.emoji) onEmoji(next);
+    else setEmojiDraft(team.emoji);
+    setPicking(false);
+  }
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   function commitName(v: string) {
@@ -450,38 +466,43 @@ function TeamBox({
         ✕
       </button>
       <div className="flex items-center gap-2 mb-3">
-        <button
-          onClick={() => setPicking((p) => !p)}
-          className="text-3xl leading-none"
-          aria-label="Change team emoji"
-          type="button"
-        >
-          {team.emoji}
-        </button>
+        {picking ? (
+          <input
+            ref={emojiInputRef}
+            value={emojiDraft}
+            onChange={(e) => setEmojiDraft(e.target.value)}
+            onBlur={commitEmoji}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitEmoji();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setEmojiDraft(team.emoji);
+                setPicking(false);
+              }
+            }}
+            maxLength={32}
+            aria-label="Team emoji"
+            placeholder="🎉"
+            className="w-12 text-3xl leading-none bg-black/30 rounded-lg px-1 py-0.5 outline-none ring-2 ring-white/60 text-center"
+          />
+        ) : (
+          <button
+            onClick={() => setPicking(true)}
+            className="text-3xl leading-none"
+            aria-label="Change team emoji"
+            type="button"
+          >
+            {team.emoji}
+          </button>
+        )}
         <input
           value={name}
           onChange={(e) => commitName(e.target.value)}
           className="flex-1 bg-transparent border-b border-white/30 px-1 py-1 font-display font-bold text-lg outline-none focus:border-white"
         />
       </div>
-
-      {picking ? (
-        <div className="mb-3 p-2 bg-black/30 rounded-lg flex flex-wrap gap-1">
-          {EMOJI_OPTIONS.map((e) => (
-            <button
-              key={e}
-              type="button"
-              className="text-2xl p-1 hover:scale-125 transition-transform"
-              onClick={() => {
-                onEmoji(e);
-                setPicking(false);
-              }}
-            >
-              {e}
-            </button>
-          ))}
-        </div>
-      ) : null}
 
       <div className="text-xs opacity-80 mb-2">
         {players.length} player{players.length === 1 ? "" : "s"}

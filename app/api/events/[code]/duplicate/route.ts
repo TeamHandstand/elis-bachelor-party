@@ -1,22 +1,20 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isHostAuthorized } from "@/lib/auth/host";
-import { createTeam } from "@/lib/db/queries";
+import { duplicateEvent } from "@/lib/db/queries";
 import { normalizeEventCode } from "@/lib/utils/code";
-import type { CreateTeamResponse } from "@/lib/api/contract";
+import type { DuplicateEventResponse } from "@/lib/api/contract";
 
 const BodySchema = z
   .object({
-    name: z.string().trim().min(1).max(40).optional(),
-    emoji: z.string().trim().min(1).max(32).optional(),
-    color: z.string().trim().min(1).max(80).optional(),
+    copyTeamsAndPlayers: z.boolean().optional(),
   })
   .strict();
 
 export async function POST(
   req: Request,
   { params }: { params: { code: string } },
-): Promise<NextResponse<CreateTeamResponse | { error: string }>> {
+): Promise<NextResponse<DuplicateEventResponse | { error: string }>> {
   if (!(await isHostAuthorized())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -37,9 +35,12 @@ export async function POST(
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const result = await createTeam({ code, ...parsed.data });
-  if ("error" in result) {
+  const result = await duplicateEvent({
+    sourceCode: code,
+    copyTeamsAndPlayers: parsed.data.copyTeamsAndPlayers ?? false,
+  });
+  if (!result) {
     return NextResponse.json({ error: "Event not found" }, { status: 404 });
   }
-  return NextResponse.json({ team: result.team });
+  return NextResponse.json(result, { status: 201 });
 }

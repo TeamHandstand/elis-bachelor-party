@@ -7,28 +7,6 @@ import { RenameModal } from "./RenameModal";
 
 const PLACE_LABELS = ["1st", "2nd", "3rd", "4th", "5th"];
 
-const TEAM_EMOJI_OPTIONS = [
-  "🍕",
-  "🍝",
-  "🍍",
-  "🌭",
-  "🍔",
-  "🌮",
-  "🍣",
-  "🥨",
-  "🍩",
-  "🍦",
-  "🥑",
-  "🥩",
-  "🥟",
-  "🍤",
-  "🍪",
-  "🌶️",
-  "🍗",
-  "🐟",
-  "🍄",
-];
-
 export function TeamHeader() {
   const team = useToastyStore((s) => s.getMyTeam());
   const event = useToastyStore((s) => s.event);
@@ -121,7 +99,6 @@ export function TeamHeader() {
           title="Edit your team"
           initial={team.name}
           emojiInitial={team.emoji}
-          emojiOptions={TEAM_EMOJI_OPTIONS}
           busyLabel="RENAMING…"
           onClose={() => setEditing(false)}
           onSubmit={handleRename}

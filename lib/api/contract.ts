@@ -54,6 +54,20 @@ export interface CreateEventResponse {
   teams: Team[]; // 3 default teams
 }
 
+// ---------- POST /api/events/:code/duplicate ----------
+// Host-cookie. Clones the event into a fresh lobby with a new code.
+// `copyTeamsAndPlayers` controls whether teams + players (with team
+// assignments) are copied over. Progress, winners, round state, and the
+// host-player assignment are never copied.
+export interface DuplicateEventRequest {
+  copyTeamsAndPlayers?: boolean;
+}
+export interface DuplicateEventResponse {
+  event: EventConfig;
+  teams: Team[];
+  players: Player[];
+}
+
 // ---------- GET /api/events/:code ----------
 // Public read of event config + teams + players (no progress data — that's PubNub).
 export interface GetEventResponse {

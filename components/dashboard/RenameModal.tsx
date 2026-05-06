@@ -6,7 +6,6 @@ interface Props {
   title: string;
   initial: string;
   emojiInitial?: string; // when present, show an emoji input row too
-  emojiOptions?: string[];
   busyLabel?: string;
   onClose(): void;
   onSubmit(value: { name: string; emoji?: string }): Promise<void>;
@@ -20,7 +19,6 @@ export function RenameModal({
   title,
   initial,
   emojiInitial,
-  emojiOptions,
   busyLabel,
   onClose,
   onSubmit,
@@ -85,29 +83,24 @@ export function RenameModal({
           {title}
         </div>
 
-        {emojiInitial !== undefined && emojiOptions && (
-          <div className="mb-4">
-            <div className="text-[11px] uppercase tracking-widest opacity-70 mb-2 font-bold">
+        {emojiInitial !== undefined && (
+          <label className="block mb-4">
+            <span className="text-[11px] uppercase tracking-widest opacity-70 font-bold">
               Emoji
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {emojiOptions.map((opt) => (
-                <button
-                  type="button"
-                  key={opt}
-                  onClick={() => setEmoji(opt)}
-                  className={`text-2xl w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
-                    emoji === opt
-                      ? "bg-bg-deep ring-2 ring-accent-orange"
-                      : "bg-bg-deep border border-white/10 hover:border-accent-orange/40"
-                  }`}
-                  aria-label={`Pick ${opt}`}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          </div>
+            </span>
+            <input
+              type="text"
+              value={emoji}
+              onChange={(e) => setEmoji(e.target.value)}
+              maxLength={32}
+              placeholder="🎉"
+              aria-label="Team emoji"
+              className="mt-1 w-20 text-3xl text-center rounded-xl bg-bg-deep border border-white/10 px-3 py-2 outline-none focus:border-accent-pink"
+            />
+            <span className="block mt-1 text-[10px] opacity-60">
+              Tap to open your keyboard&apos;s emoji picker
+            </span>
+          </label>
         )}
 
         <label className="block">

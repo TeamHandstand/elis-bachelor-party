@@ -75,6 +75,16 @@ export async function deleteEvent(code: string): Promise<{ ok: true }> {
   return http<{ ok: true }>(`/api/events/${code}`, { method: "DELETE" });
 }
 
+export async function duplicateEvent(
+  code: string,
+  body: import("@/lib/api/contract").DuplicateEventRequest = {},
+): Promise<import("@/lib/api/contract").DuplicateEventResponse> {
+  return http<import("@/lib/api/contract").DuplicateEventResponse>(
+    `/api/events/${code}/duplicate`,
+    { method: "POST", body },
+  );
+}
+
 export async function patchEvent(
   code: string,
   body: UpdateEventRequest
