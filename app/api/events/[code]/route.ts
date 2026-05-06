@@ -21,12 +21,23 @@ const ChallengeIdSchema = z.enum([
   "spin",
   "north",
   "time-guess",
+  "trivia",
 ]);
+
+const TriviaQuestionSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    prompt: z.string().min(1).max(500),
+    choices: z.array(z.string().max(200)).min(2).max(8),
+    correctIndex: z.number().int().nonnegative(),
+  })
+  .strict();
 
 const RoundConfigSchema = z
   .object({
     challenge: ChallengeIdSchema,
     threshold: z.number().finite().nonnegative(),
+    questions: z.array(TriviaQuestionSchema).max(100).optional(),
   })
   .strict();
 

@@ -8,7 +8,8 @@ export type ChallengeId =
   | "shake"
   | "spin"
   | "north"
-  | "time-guess";
+  | "time-guess"
+  | "trivia";
 
 export type EventStatus = "lobby" | "active" | "finished";
 
@@ -16,7 +17,8 @@ export type AggregationMode =
   | "team-total" // sum across teammates (distance, steps, taps)
   | "all-simultaneous" // all 3 mics/phones must satisfy the condition concurrently (scream, shake)
   | "per-player" // each teammate must individually hit the threshold (spin)
-  | "per-player-once"; // each teammate gets one shot (north)
+  | "per-player-once" // each teammate gets one shot (north)
+  | "team-block"; // ONE submission per team — entire answer block at once (trivia)
 
 export interface ChallengeDef {
   id: ChallengeId;
@@ -73,6 +75,33 @@ export interface CompleteMsg {
   roundIndex: number;
   challenge: ChallengeId;
   ts: number;
+}
+
+// Live-synced draft answer pick for trivia. Any teammate can change the
+// team's draft answer for any question; everyone on the team sees the same
+// draft until one person submits.
+export interface TriviaPickMsg {
+  kind: "trivia-pick";
+  teamId: string;
+  playerId: string;
+  roundIndex: number;
+  questionId: string;
+  choiceIndex: number; // -1 to clear
+  ts: number;
+}
+
+// Final team submission for a trivia round. The team's final answers, frozen.
+// `correctCount` is computed by the publisher (host of the device that hit
+// SUBMIT) against the round's question set; receivers trust it since the same
+// question set is in events.rounds[roundIndex].questions.
+export interface TriviaSubmitMsg {
+  kind: "trivia-submit";
+  teamId: string;
+  playerId: string; // who hit submit, for "submitted by"
+  roundIndex: number;
+  answers: Record<string, number>; // questionId -> choiceIndex
+  correctCount: number;
+  ts: number; // submission timestamp — used as tiebreaker
 }
 
 export interface EventStateMsg {
@@ -150,6 +179,8 @@ export type ProgressMsg =
   | LiveLevelMsg
   | NorthGuessMsg
   | CompleteMsg
+  | TriviaPickMsg
+  | TriviaSubmitMsg
   | EventStateMsg
   | PlayerJoinedMsg
   | TeamAssignmentMsg
@@ -174,11 +205,32 @@ export interface RoundWinnerEntry {
 
 export type RoundStatus = "live" | "decided";
 
+// A single trivia question. `correctIndex` indexes into `choices`.
+export interface TriviaQuestion {
+  id: string;
+  prompt: string;
+  choices: string[];
+  correctIndex: number;
+}
+
 // One slot in the event's round list. The host can drag-drop these around
 // and add multiple of the same challenge type with different thresholds.
 export interface RoundConfig {
   challenge: ChallengeId;
   threshold: number;
+  // Only populated for `challenge === "trivia"`. Inlined into the round so
+  // duplicate trivia rounds in one event can each have their own questions.
+  questions?: TriviaQuestion[];
+}
+
+// A reusable trivia question set the host can save and apply to any trivia
+// round. Lives in its own DB table — independent of any single event.
+export interface TriviaPreset {
+  id: string;
+  name: string;
+  questions: TriviaQuestion[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface EventConfig {
@@ -227,6 +279,12 @@ export interface ChallengeProgress {
   perPlayer?: Record<string, number>;
   // For 'north' / 'time-guess', list of guesses
   guesses?: Array<{ playerId: string; errorDeg: number }>;
+  // Trivia: live-synced draft picks before submit (any teammate may edit).
+  triviaDraft?: Record<string, number>; // questionId -> choiceIndex
+  // Trivia: frozen submitted answer block. Set on TriviaSubmitMsg receive.
+  triviaAnswers?: Record<string, number>;
+  // Trivia: which teammate hit SUBMIT.
+  triviaSubmittedBy?: string;
 }
 
 // Keyed by round index (number). Rounds that haven't been touched yet

@@ -54,8 +54,9 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
     }
   }
 
-  // Sort entries: north + time-guess use smallest-avg-error, others use
-  // earliest completion.
+  // Sort entries: north + time-guess use smallest-avg-error, trivia uses
+  // most-correct with earliest-submission tiebreak, others use earliest
+  // completion.
   const sortedEntries = useMemo(() => {
     if (variant.kind !== "end") return [] as EndPickerEntry[];
     if (
@@ -74,6 +75,15 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
           (b.guesses ?? []).reduce((s, g) => s + g.errorDeg, 0) /
           Math.max(1, bg);
         return aAvg - bAvg;
+      });
+    }
+    if (variant.challenge === "trivia") {
+      return [...variant.entries].sort((a, b) => {
+        const aDone = a.completedAt !== null;
+        const bDone = b.completedAt !== null;
+        if (aDone !== bDone) return aDone ? -1 : 1;
+        if (a.value !== b.value) return b.value - a.value;
+        return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
       });
     }
     return [...variant.entries].sort((a, b) => {

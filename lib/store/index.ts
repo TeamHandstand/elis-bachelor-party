@@ -8,7 +8,7 @@ import type {
   Team,
   TeamProgress,
 } from "@/lib/types";
-import { CHALLENGES } from "@/lib/challenges";
+import { CHALLENGES, scoreTriviaAnswers } from "@/lib/challenges";
 
 // ---------- Helpers ----------
 
@@ -213,6 +213,58 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         break;
       }
 
+      case "trivia-pick": {
+        const teamProg = state.progress[msg.teamId];
+        if (!teamProg) return;
+        const next: TeamProgress = { ...teamProg };
+        const cur = ensureCell(next, msg.roundIndex);
+        // After submit, picks no longer mutate the locked answer block.
+        if (cur.completed) break;
+        const draft = { ...(cur.triviaDraft ?? {}) };
+        if (msg.choiceIndex < 0) {
+          delete draft[msg.questionId];
+        } else {
+          draft[msg.questionId] = msg.choiceIndex;
+        }
+        next[msg.roundIndex] = { ...cur, triviaDraft: draft };
+        set({
+          progress: { ...state.progress, [msg.teamId]: next },
+        });
+        break;
+      }
+
+      case "trivia-submit": {
+        const teamProg = state.progress[msg.teamId];
+        if (!teamProg) return;
+        const next: TeamProgress = { ...teamProg };
+        const cur = ensureCell(next, msg.roundIndex);
+        // First-submit-wins: if the team already submitted, keep the original.
+        if (cur.completed) break;
+        // Trust the publisher's correctCount when it was computed against
+        // the same question set; recompute defensively if questions are
+        // present in our local event copy.
+        const ev = state.event;
+        const round = ev?.rounds[msg.roundIndex];
+        const questions = round?.questions ?? [];
+        const correct =
+          questions.length > 0
+            ? scoreTriviaAnswers(questions, msg.answers)
+            : msg.correctCount;
+        next[msg.roundIndex] = {
+          ...cur,
+          value: correct,
+          completed: true,
+          completedAt: msg.ts,
+          triviaAnswers: { ...msg.answers },
+          triviaSubmittedBy: msg.playerId,
+        };
+        set({
+          progress: { ...state.progress, [msg.teamId]: next },
+        });
+        get().recomputeCompletion(msg.teamId);
+        break;
+      }
+
       case "event-state": {
         get().setEventStatus(msg.status, msg.winnerTeamId);
         break;
@@ -402,6 +454,10 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         }
         case "all-simultaneous":
           // 'complete' message-driven; never auto-completed via threshold here.
+          break;
+        case "team-block":
+          // Trivia: completion is set explicitly by the trivia-submit handler
+          // (which writes completed=true). No threshold check here.
           break;
       }
 

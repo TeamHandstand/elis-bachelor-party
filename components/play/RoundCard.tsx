@@ -51,6 +51,8 @@ function thresholdLabel(challenge: ChallengeId, threshold: number): string {
       return "one guess each";
     case "time-guess":
       return `target ${(threshold / 1000).toFixed(0)}s`;
+    case "trivia":
+      return "most correct wins";
   }
 }
 

@@ -11,12 +11,13 @@ import StartButton from "./StartButton";
 import ResetButtons from "./ResetButtons";
 import EndButton from "./EndButton";
 import TeamBuilder from "./TeamBuilder";
+import TriviaPresetLibrary from "./TriviaPresetLibrary";
 
 interface Props {
   initial: GetEventResponse;
 }
 
-type Tab = "config" | "teams" | "monitor";
+type Tab = "config" | "teams" | "trivia" | "monitor";
 
 export default function HostDashboard({ initial }: Props) {
   const [event, setEvent] = useState<EventConfig>(initial.event);
@@ -79,6 +80,8 @@ export default function HostDashboard({ initial }: Props) {
               />
             </div>
           ) : null}
+
+          {tab === "trivia" ? <TriviaPresetLibrary /> : null}
 
           {tab === "monitor" ? <HostMonitor code={event.code} /> : null}
         </div>
@@ -185,6 +188,7 @@ function Tabs({
   const items: Array<{ id: Tab; label: string; emoji: string }> = [
     { id: "config", label: "Config + QR", emoji: "⚙️" },
     { id: "teams", label: "Team builder", emoji: "👥" },
+    { id: "trivia", label: "Trivia library", emoji: "📚" },
     {
       id: "monitor",
       label: status === "active" ? "Live monitor" : "Monitor",

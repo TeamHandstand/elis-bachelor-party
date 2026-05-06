@@ -144,6 +144,14 @@ export function JourneyView({ code, myPlayerId }: Props) {
         const bAvg = b.guesses.reduce((s, g) => s + g.errorDeg, 0) / bg;
         return aAvg - bAvg;
       });
+    } else if (round.challenge === "trivia") {
+      scored.sort((a, b) => {
+        const aDone = a.completedAt !== null;
+        const bDone = b.completedAt !== null;
+        if (aDone !== bDone) return aDone ? -1 : 1;
+        if (a.value !== b.value) return b.value - a.value;
+        return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
+      });
     } else {
       scored.sort((a, b) => {
         const aDone = a.completedAt !== null;

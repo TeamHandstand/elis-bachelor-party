@@ -10,6 +10,9 @@ export interface ResultEntry {
   completedAt: number | null;
   perPlayer?: Record<string, number>;
   guesses?: Array<{ playerId: string; errorDeg: number }>;
+  // Trivia: the team's submitted answer block (questionId -> choiceIndex).
+  triviaAnswers?: Record<string, number>;
+  triviaSubmittedBy?: string;
 }
 
 interface Props {
@@ -27,6 +30,9 @@ interface Props {
   winnerTeamId?: string | null;
   // Event code so we can render a "back to rounds" button on each result view.
   code?: string;
+  // Trivia: the round's question list — needed to label answer choices in
+  // the per-team breakdown and confirm correctness.
+  triviaQuestions?: import("@/lib/types").TriviaQuestion[];
 }
 
 function formatTime(ms: number | null): string {
@@ -63,6 +69,15 @@ function sortEntries(entries: ResultEntry[], challenge: ChallengeId): ResultEntr
       return northAvgError(a) - northAvgError(b);
     });
   }
+  if (challenge === "trivia") {
+    return [...entries].sort((a, b) => {
+      const aDone = a.completedAt !== null;
+      const bDone = b.completedAt !== null;
+      if (aDone !== bDone) return aDone ? -1 : 1;
+      if (a.value !== b.value) return b.value - a.value;
+      return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
+    });
+  }
   return [...entries].sort((a, b) => {
     const aDone = a.completedAt !== null;
     const bDone = b.completedAt !== null;
@@ -91,6 +106,7 @@ export function RoundResults({
   mode,
   winnerTeamId,
   code,
+  triviaQuestions,
 }: Props) {
   const def = CHALLENGES[challenge];
 
@@ -105,6 +121,7 @@ export function RoundResults({
         entry={mine}
         players={players}
         code={code}
+        triviaQuestions={triviaQuestions}
       />
     );
   }
@@ -148,6 +165,7 @@ export function RoundResults({
           isMine={entry.team.id === myTeamId}
           isWinner={entry.team.id === winnerTeamId}
           players={players}
+          triviaQuestions={triviaQuestions}
         />
       ))}
       {code ? (
@@ -171,6 +189,7 @@ function MyTeamCard({
   entry,
   players,
   code,
+  triviaQuestions,
 }: {
   challenge: ChallengeId;
   threshold: number;
@@ -178,8 +197,43 @@ function MyTeamCard({
   entry: ResultEntry;
   players: Record<string, Player>;
   code?: string;
+  triviaQuestions?: import("@/lib/types").TriviaQuestion[];
 }) {
   const def = CHALLENGES[challenge];
+
+  if (challenge === "trivia") {
+    const total = triviaQuestions?.length ?? 0;
+    const correct = entry.value;
+    const submitterName = entry.triviaSubmittedBy
+      ? players[entry.triviaSubmittedBy]?.name ?? "your team"
+      : "your team";
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 p-6 bg-gradient-done text-white text-center">
+        <div className="text-xs uppercase tracking-[0.3em] opacity-90 mb-2">
+          ✅ submitted by {submitterName}
+        </div>
+        <div className="text-6xl mb-2">❓</div>
+        <div className="font-display text-7xl font-extrabold tabular-nums leading-none">
+          {correct}
+          <span className="text-3xl opacity-80"> / {total}</span>
+        </div>
+        <div className="text-xs uppercase tracking-widest opacity-90 mt-2">
+          correct
+        </div>
+        <div className="mt-6 text-[11px] opacity-90 max-w-xs">
+          wait for host to end the round and crown the winner.
+        </div>
+        {code ? (
+          <Link
+            href={`/e/${code}/play`}
+            className="mt-6 px-6 py-3 rounded-2xl bg-black/30 text-white font-bold tracking-widest text-xs uppercase border border-white/30"
+          >
+            ← back to rounds
+          </Link>
+        ) : null}
+      </div>
+    );
+  }
 
   if (challenge === "time-guess") {
     const guesses = entry.guesses ?? [];
@@ -314,6 +368,7 @@ function TeamResultRow({
   isMine,
   isWinner,
   players,
+  triviaQuestions,
 }: {
   challenge: ChallengeId;
   threshold: number;
@@ -323,13 +378,26 @@ function TeamResultRow({
   isMine: boolean;
   isWinner: boolean;
   players: Record<string, Player>;
+  triviaQuestions?: import("@/lib/types").TriviaQuestion[];
 }) {
   const def = CHALLENGES[challenge];
   const ms = timeTaken(entry, roundStartedAt);
 
   let primary: string;
   let secondary: string;
-  if (challenge === "north") {
+  if (challenge === "trivia") {
+    const total = triviaQuestions?.length ?? 0;
+    if (entry.completedAt === null) {
+      primary = "no submit";
+      secondary = "—";
+    } else {
+      primary = `${entry.value} / ${total}`;
+      const submitterName = entry.triviaSubmittedBy
+        ? players[entry.triviaSubmittedBy]?.name ?? "?"
+        : "team";
+      secondary = `submitted ${formatTime(ms)} · by ${submitterName}`;
+    }
+  } else if (challenge === "north") {
     const guesses = entry.guesses ?? [];
     if (guesses.length === 0) {
       primary = "no guesses";
@@ -405,6 +473,34 @@ function TeamResultRow({
           ))}
         </div>
       )}
+      {challenge === "trivia" &&
+        triviaQuestions &&
+        triviaQuestions.length > 0 &&
+        entry.triviaAnswers && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {triviaQuestions.map((q, i) => {
+              const picked = entry.triviaAnswers?.[q.id];
+              const correct = picked === q.correctIndex;
+              const unanswered = picked === undefined;
+              return (
+                <span
+                  key={q.id}
+                  title={q.prompt}
+                  className={`text-[10px] tabular-nums px-2 py-1 rounded font-bold ${
+                    unanswered
+                      ? "bg-black/30 opacity-60"
+                      : correct
+                        ? "bg-accent-green/30 text-white"
+                        : "bg-accent-pink/20"
+                  }`}
+                >
+                  Q{i + 1}{" "}
+                  {unanswered ? "—" : correct ? "✓" : "✗"}
+                </span>
+              );
+            })}
+          </div>
+        )}
     </div>
   );
 }

@@ -9,7 +9,7 @@ import {
   integer,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import type { RoundWinnerEntry } from "@/lib/types";
+import type { RoundWinnerEntry, TriviaQuestion } from "@/lib/types";
 
 export const events = pgTable("events", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -75,7 +75,19 @@ export const finalProgress = pgTable(
   }),
 );
 
+// Reusable trivia question bundles. Global (not scoped to an event) — the
+// host can apply any preset to any trivia round in any event. Stored as
+// jsonb so the question shape can evolve without a migration.
+export const triviaPresets = pgTable("trivia_presets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  questions: jsonb("questions").$type<TriviaQuestion[]>().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type EventRow = typeof events.$inferSelect;
 export type TeamRow = typeof teams.$inferSelect;
 export type PlayerRow = typeof players.$inferSelect;
 export type FinalProgressRow = typeof finalProgress.$inferSelect;
+export type TriviaPresetRow = typeof triviaPresets.$inferSelect;

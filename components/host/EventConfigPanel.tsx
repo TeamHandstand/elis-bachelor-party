@@ -20,6 +20,7 @@ import type {
   ChallengeId,
   EventConfig,
   RoundConfig,
+  TriviaQuestion,
 } from "@/lib/types";
 import type { UpdateEventRequest } from "@/lib/api/contract";
 import {
@@ -28,6 +29,7 @@ import {
   challengeHasThreshold,
 } from "@/lib/challenges";
 import { patchEvent } from "./_fetch";
+import { TriviaRoundModal } from "./TriviaRoundModal";
 
 interface Props {
   event: EventConfig;
@@ -60,6 +62,7 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingTrivia, setEditingTrivia] = useState<RowId | null>(null);
 
   const lastEventId = useRef(event.id);
   useEffect(() => {
@@ -129,10 +132,11 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
 
   function addRound(challenge: ChallengeId) {
     const def = CHALLENGES[challenge];
-    applyRows([
-      ...rows,
-      { id: newRowId(), round: { challenge, threshold: def.defaultThreshold } },
-    ]);
+    const round: RoundConfig =
+      challenge === "trivia"
+        ? { challenge, threshold: def.defaultThreshold, questions: [] }
+        : { challenge, threshold: def.defaultThreshold };
+    applyRows([...rows, { id: newRowId(), round }]);
   }
 
   const sensors = useSensors(
@@ -213,6 +217,7 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
                   round={row.round}
                   onChange={(patch) => updateRow(row.id, patch)}
                   onRemove={() => removeRow(row.id)}
+                  onEditTrivia={() => setEditingTrivia(row.id)}
                 />
               ))}
             </div>
@@ -221,6 +226,23 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
 
         <AddRoundBar onAdd={addRound} />
       </div>
+
+      {editingTrivia &&
+        (() => {
+          const row = rows.find((r) => r.id === editingTrivia);
+          if (!row) return null;
+          const ordinal = rows.findIndex((r) => r.id === editingTrivia) + 1;
+          return (
+            <TriviaRoundModal
+              ordinal={ordinal}
+              initialQuestions={row.round.questions ?? []}
+              onClose={() => setEditingTrivia(null)}
+              onSave={(qs: TriviaQuestion[]) =>
+                updateRow(row.id, { questions: qs })
+              }
+            />
+          );
+        })()}
     </section>
   );
 }
@@ -231,12 +253,14 @@ function SortableRoundRow({
   round,
   onChange,
   onRemove,
+  onEditTrivia,
 }: {
   rowId: string;
   ordinal: number;
   round: RoundConfig;
   onChange: (patch: Partial<RoundConfig>) => void;
   onRemove: () => void;
+  onEditTrivia: () => void;
 }) {
   const def = CHALLENGES[round.challenge];
   const {
@@ -255,6 +279,8 @@ function SortableRoundRow({
   };
 
   const showThreshold = challengeHasThreshold(round.challenge);
+  const isTrivia = round.challenge === "trivia";
+  const triviaCount = round.questions?.length ?? 0;
   const selectId = useId();
 
   return (
@@ -297,7 +323,21 @@ function SortableRoundRow({
         <div className="text-xs opacity-60">{def.description}</div>
       </div>
       <div className="flex items-center gap-2">
-        {showThreshold ? (
+        {isTrivia ? (
+          <button
+            type="button"
+            onClick={onEditTrivia}
+            className={`px-3 py-2 rounded-lg border text-xs font-bold ${
+              triviaCount === 0
+                ? "bg-bg-deep border-accent-pink/50 text-accent-pink"
+                : "bg-bg-deep border-white/10 hover:border-accent-orange"
+            }`}
+          >
+            {triviaCount === 0
+              ? "✏️ add questions"
+              : `❓ ${triviaCount} question${triviaCount === 1 ? "" : "s"} · edit`}
+          </button>
+        ) : showThreshold ? (
           round.challenge === "time-guess" ? (
             <>
               <input

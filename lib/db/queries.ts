@@ -6,14 +6,17 @@ import {
   teams,
   players,
   finalProgress,
+  triviaPresets,
   type EventRow,
   type TeamRow,
   type PlayerRow,
   type FinalProgressRow,
+  type TriviaPresetRow,
 } from "./schema";
 import {
   CHALLENGES,
   coerceRounds,
+  coerceTriviaQuestions,
   defaultRounds,
 } from "@/lib/challenges";
 import type {
@@ -25,6 +28,8 @@ import type {
   RoundStatus,
   RoundWinnerEntry,
   Team,
+  TriviaPreset,
+  TriviaQuestion,
 } from "@/lib/types";
 import { generateEventCode } from "@/lib/utils/code";
 
@@ -221,7 +226,18 @@ export async function updateEvent(
   const updates: Partial<typeof events.$inferInsert> = {};
   if (typeof patch.title === "string") updates.title = patch.title;
   if (typeof patch.groomName === "string") updates.groomName = patch.groomName;
-  if (patch.rounds) updates.challenges = patch.rounds;
+  if (patch.rounds) {
+    // Sanitize per-round trivia questions defensively before persisting so
+    // bad client-side state can't poison the jsonb column.
+    updates.challenges = patch.rounds.map((r) => {
+      if (r.challenge !== "trivia") return { challenge: r.challenge, threshold: r.threshold };
+      return {
+        challenge: r.challenge,
+        threshold: r.threshold,
+        questions: coerceTriviaQuestions(r.questions ?? []),
+      };
+    });
+  }
 
   let updatedEventRow: EventRow = existing;
   if (Object.keys(updates).length > 0) {
@@ -1018,14 +1034,27 @@ export async function endRound(input: {
       // Universal rule: if any team has finished this round, the earliest
       // finisher wins. Auto-end is no longer triggered by clients, so
       // multiple teams may have finished by the time the host clicks End
-      // Round — pick the one who got there first.
-      const completedRows = fpRows
-        .filter((r) => r.roundIndex === idx && r.completed)
-        .sort((a, b) => {
+      // Round — pick the one who got there first. Trivia is the exception:
+      // most-correct wins, with submission time as tiebreak.
+      const completedRows = fpRows.filter(
+        (r) => r.roundIndex === idx && r.completed,
+      );
+      if (challenge === "trivia") {
+        completedRows.sort((a, b) => {
+          const av = Number(a.value);
+          const bv = Number(b.value);
+          if (av !== bv) return bv - av;
           const at = a.completedAt?.getTime() ?? Infinity;
           const bt = b.completedAt?.getTime() ?? Infinity;
           return at - bt;
         });
+      } else {
+        completedRows.sort((a, b) => {
+          const at = a.completedAt?.getTime() ?? Infinity;
+          const bt = b.completedAt?.getTime() ?? Infinity;
+          return at - bt;
+        });
+      }
 
       if (completedRows.length > 0) {
         winnerTeamId = completedRows[0].teamId;
@@ -1217,4 +1246,67 @@ export async function activateEvent(
     .returning();
 
   return { event: eventRowToConfig(updated[0] ?? eventRow) };
+}
+
+// ---------------------------------------------------------------------------
+// Trivia presets — reusable question bundles, global to the deployment.
+// ---------------------------------------------------------------------------
+
+function triviaPresetRowToPreset(row: TriviaPresetRow): TriviaPreset {
+  return {
+    id: row.id,
+    name: row.name,
+    questions: coerceTriviaQuestions(row.questions),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export async function listTriviaPresets(): Promise<TriviaPreset[]> {
+  const rows = await db
+    .select()
+    .from(triviaPresets)
+    .orderBy(sql`${triviaPresets.updatedAt} DESC`);
+  return rows.map(triviaPresetRowToPreset);
+}
+
+export async function createTriviaPreset(input: {
+  name: string;
+  questions: TriviaQuestion[];
+}): Promise<TriviaPreset> {
+  const inserted = await db
+    .insert(triviaPresets)
+    .values({
+      name: input.name.trim() || "Untitled trivia",
+      questions: coerceTriviaQuestions(input.questions),
+    })
+    .returning();
+  return triviaPresetRowToPreset(inserted[0]);
+}
+
+export async function updateTriviaPreset(input: {
+  id: string;
+  name?: string;
+  questions?: TriviaQuestion[];
+}): Promise<TriviaPreset | null> {
+  const patch: Partial<typeof triviaPresets.$inferInsert> = {
+    updatedAt: new Date(),
+  };
+  if (typeof input.name === "string") patch.name = input.name.trim() || "Untitled trivia";
+  if (input.questions) patch.questions = coerceTriviaQuestions(input.questions);
+  const updated = await db
+    .update(triviaPresets)
+    .set(patch)
+    .where(eq(triviaPresets.id, input.id))
+    .returning();
+  if (!updated[0]) return null;
+  return triviaPresetRowToPreset(updated[0]);
+}
+
+export async function deleteTriviaPreset(id: string): Promise<boolean> {
+  const result = await db
+    .delete(triviaPresets)
+    .where(eq(triviaPresets.id, id))
+    .returning({ id: triviaPresets.id });
+  return result.length > 0;
 }

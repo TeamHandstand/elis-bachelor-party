@@ -3,6 +3,7 @@ import type {
   ChallengeId,
   EventConfig,
   RoundConfig,
+  TriviaQuestion,
 } from "@/lib/types";
 
 export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
@@ -93,6 +94,19 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
     formatProgress: (v, t) =>
       `${Math.floor(v)} guesses in · target ${(t / 1000).toFixed(1)}s`,
   },
+  trivia: {
+    id: "trivia",
+    label: "Trivia",
+    emoji: "❓",
+    // Threshold is unused — score is correct count vs. the round's question
+    // list. Stored as 0 so the host UI doesn't ask for one.
+    defaultThreshold: 0,
+    unit: "correct",
+    aggregation: "team-block",
+    description:
+      "Whole team picks answers together (live synced) and submits one block. Most correct wins; tie → earliest submit.",
+    formatProgress: (v) => `${Math.floor(v)} correct`,
+  },
 };
 
 /**
@@ -127,6 +141,8 @@ export function challengeCommand(id: ChallengeId, threshold: number): string {
       const seconds = (threshold / 1000).toFixed(0);
       return `Each teammate: tap GO, then STOP after ${seconds} seconds — closest avg wins!`;
     }
+    case "trivia":
+      return `Pick answers together — most correct wins! (Tie → earliest submit.)`;
   }
 }
 
@@ -139,14 +155,16 @@ export const CHALLENGE_ORDER: ChallengeId[] = [
   "spin",
   "north",
   "time-guess",
+  "trivia",
 ];
 
 /**
  * Default round list for a freshly-created event: one round per challenge
- * type, in the canonical order, each at its default threshold.
+ * type that ships with sensible defaults. Trivia is excluded — it needs
+ * questions, which the host must author before adding the round.
  */
 export function defaultRounds(): RoundConfig[] {
-  return CHALLENGE_ORDER.map((id) => ({
+  return CHALLENGE_ORDER.filter((id) => id !== "trivia").map((id) => ({
     challenge: id,
     threshold: CHALLENGES[id].defaultThreshold,
   }));
@@ -193,12 +211,77 @@ export function challengeForRound(
 }
 
 /**
- * Whether the challenge is one whose threshold is host-tunable. North is
- * the only exception today — its score is the team's average angular error
- * and every player gets exactly one guess.
+ * Whether the challenge is one whose threshold is host-tunable. Trivia and
+ * north are the exceptions: trivia is scored by correct count vs. its own
+ * embedded question list, north by avg angular error with one guess each.
  */
 export function challengeHasThreshold(id: ChallengeId): boolean {
-  return id !== "north";
+  return id !== "north" && id !== "trivia";
+}
+
+// ---------------------------------------------------------------------------
+// Trivia helpers
+// ---------------------------------------------------------------------------
+
+export function newTriviaQuestionId(): string {
+  return `q_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function emptyTriviaQuestion(): TriviaQuestion {
+  return {
+    id: newTriviaQuestionId(),
+    prompt: "",
+    choices: ["", ""],
+    correctIndex: 0,
+  };
+}
+
+/**
+ * Coerce arbitrary jsonb input into a clean TriviaQuestion[]. Drops any
+ * malformed entries; ensures every question has a stable id and a sensible
+ * correctIndex within bounds.
+ */
+export function coerceTriviaQuestions(raw: unknown): TriviaQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TriviaQuestion[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as {
+      id?: unknown;
+      prompt?: unknown;
+      choices?: unknown;
+      correctIndex?: unknown;
+    };
+    const choices = Array.isArray(o.choices)
+      ? o.choices.filter((c): c is string => typeof c === "string")
+      : [];
+    if (choices.length < 2) continue;
+    const prompt = typeof o.prompt === "string" ? o.prompt : "";
+    if (!prompt.trim()) continue;
+    let correctIndex =
+      typeof o.correctIndex === "number" && Number.isInteger(o.correctIndex)
+        ? o.correctIndex
+        : 0;
+    if (correctIndex < 0 || correctIndex >= choices.length) correctIndex = 0;
+    const id = typeof o.id === "string" && o.id ? o.id : newTriviaQuestionId();
+    out.push({ id, prompt, choices, correctIndex });
+  }
+  return out;
+}
+
+/**
+ * Score a team's answer block against a question list. `answers` keys are
+ * question ids; missing or out-of-range answers count as wrong.
+ */
+export function scoreTriviaAnswers(
+  questions: TriviaQuestion[],
+  answers: Record<string, number>,
+): number {
+  let correct = 0;
+  for (const q of questions) {
+    if (answers[q.id] === q.correctIndex) correct += 1;
+  }
+  return correct;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +330,13 @@ export function coerceRounds(raw: unknown): RoundConfig[] {
         typeof th === "number" && Number.isFinite(th)
           ? th
           : CHALLENGES[challenge].defaultThreshold;
-      out.push({ challenge, threshold });
+      const round: RoundConfig = { challenge, threshold };
+      if (challenge === "trivia") {
+        round.questions = coerceTriviaQuestions(
+          (item as { questions?: unknown }).questions,
+        );
+      }
+      out.push(round);
     }
     return out;
   }
