@@ -1058,6 +1058,9 @@ export async function endRound(input: {
     challenge,
     teamId: winnerTeamId,
     decidedAt,
+    startedAt: eventRow.currentRoundStartsAt
+      ? eventRow.currentRoundStartsAt.getTime()
+      : null,
   };
   const existingWinners = (eventRow.roundWinners as RoundWinnerEntry[]) ?? [];
   const trimmed = existingWinners.slice(0, idx);

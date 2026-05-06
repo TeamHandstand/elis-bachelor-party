@@ -114,9 +114,6 @@ export function RoundResults({
     winnerTeamId !== undefined && winnerTeamId !== null
       ? entries.find((e) => e.team.id === winnerTeamId)
       : null;
-  const winnerPrimary = winnerEntry
-    ? primaryLabel(winnerEntry, challenge, threshold, roundStartedAt)
-    : null;
   const iWon = !!myTeamId && myTeamId === winnerTeamId;
   const haveMyTeam = !!myTeamId && entries.some((e) => e.team.id === myTeamId);
 
@@ -137,21 +134,6 @@ export function RoundResults({
             }`}
           >
             {iWon ? "🎉 YOU WON" : "💀 YOU LOST"}
-          </div>
-        ) : null}
-        {winnerEntry ? (
-          <div className="mt-3 mx-auto inline-block px-4 py-3 rounded-2xl bg-bg-card border border-white/10">
-            <div className="text-[10px] uppercase tracking-[0.3em] opacity-70">
-              and the winner is…
-            </div>
-            <div className="font-display text-xl font-extrabold mt-1">
-              🏆 {winnerEntry.team.emoji} {winnerEntry.team.name}
-            </div>
-            {winnerPrimary && (
-              <div className="text-xs uppercase tracking-widest opacity-70 mt-1 tabular-nums">
-                {winnerPrimary}
-              </div>
-            )}
           </div>
         ) : null}
       </div>
@@ -178,34 +160,6 @@ export function RoundResults({
       ) : null}
     </div>
   );
-}
-
-function primaryLabel(
-  entry: ResultEntry,
-  challenge: ChallengeId,
-  threshold: number,
-  roundStartedAt: number | null,
-): string {
-  const def = CHALLENGES[challenge];
-  if (challenge === "north") {
-    const guesses = entry.guesses ?? [];
-    if (guesses.length === 0) return "no guesses";
-    return `${northAvgError(entry).toFixed(0)}° avg error · ${guesses.length} ${
-      guesses.length === 1 ? "guess" : "guesses"
-    }`;
-  }
-  if (challenge === "time-guess") {
-    const guesses = entry.guesses ?? [];
-    if (guesses.length === 0) return "no guesses";
-    return `±${(northAvgError(entry) / 1000).toFixed(2)}s avg · ${guesses.length} ${
-      guesses.length === 1 ? "guess" : "guesses"
-    }`;
-  }
-  if (entry.completedAt !== null) {
-    const ms = timeTaken(entry, roundStartedAt);
-    return `finished in ${formatTime(ms)}`;
-  }
-  return def.formatProgress(entry.value, threshold);
 }
 
 // ---------- My team focal card (round still live) ----------

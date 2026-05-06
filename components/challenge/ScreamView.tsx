@@ -76,7 +76,7 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
     };
   }, [myPlayerId, myTeamId, publisher, roundIndex]);
 
-  // Detect "all 3 above 80dB sustained for `threshold` seconds" and publish complete.
+  // Detect "all teammates above 80dB sustained for `threshold` seconds" and publish complete.
   useEffect(() => {
     if (!myTeamId || teamCompleted || completeSent) return;
     const interval = setInterval(() => {
@@ -88,7 +88,7 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
       const others = teammates.filter((p) => p.id !== myPlayerId);
       const allOthers = others.every((p) => recent(liveLevels[p.id]?.scream));
 
-      const allLoud = me && others.length >= 2 && allOthers;
+      const allLoud = me && allOthers;
 
       if (allLoud) {
         if (sustainedStartRef.current === null) {
@@ -119,7 +119,7 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
     const recent = !!lvl && Date.now() - lvl.ts < 1500;
     return { player: p, level: recent ? lvl?.level ?? 0 : 0, ok: recent && (lvl?.level ?? 0) >= SCREAM_DB };
   });
-  const allLoud = meAbove && othersAbove.length >= 2 && othersAbove.every((o) => o.ok);
+  const allLoud = meAbove && othersAbove.every((o) => o.ok);
 
   const sustainedSecs = sustainedStartRef.current
     ? (Date.now() - sustainedStartRef.current) / 1000
@@ -133,7 +133,9 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
     >
       <div className="text-center mb-4">
         <div className="text-xs uppercase tracking-widest opacity-60">
-          SCREAM ABOVE {SCREAM_DB} dB · all 3 sustained {threshold}s
+          SCREAM ABOVE {SCREAM_DB} dB ·{" "}
+          {teammates.length > 1 ? `all ${teammates.length}` : "you"} sustained{" "}
+          {threshold}s
         </div>
         <div className="text-sm mt-1 font-bold">
           {teamCompleted
@@ -159,7 +161,7 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
             highlight={o.ok}
           />
         ))}
-        {othersAbove.length === 0 && (
+        {teammates.length > 1 && othersAbove.length === 0 && (
           <div className="text-xs opacity-50 self-center">
             need teammates to open this challenge too
           </div>

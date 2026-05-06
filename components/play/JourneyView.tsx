@@ -417,7 +417,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 : false;
 
             let hostControls: React.ReactNode = null;
-            if (isHost) {
+            if (isHost && event.status !== "finished") {
               if (card.state.kind === "current-live") {
                 hostControls = (
                   <HostRoundControls
@@ -500,7 +500,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
               const roundStartedAt =
                 card.state.kind === "current-decided"
                   ? event.currentRoundStartsAt
-                  : null;
+                  : event.roundWinners[card.roundIndex]?.startedAt ?? null;
               expandable = (
                 <RoundBreakdown
                   challenge={round.challenge}

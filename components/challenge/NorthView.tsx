@@ -11,7 +11,7 @@ interface Props {
   roundIndex: number;
 }
 
-const TICK_COUNT = 24;
+const TICK_COUNT = 72;
 
 // Read the device's compass heading (degrees clockwise from north).
 // iOS provides webkitCompassHeading (already true heading); Android exposes
