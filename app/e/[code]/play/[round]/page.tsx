@@ -27,6 +27,7 @@ import { ShakeView } from "@/components/challenge/ShakeView";
 import { SpinView } from "@/components/challenge/SpinView";
 import { NorthView } from "@/components/challenge/NorthView";
 import { TimeGuessView } from "@/components/challenge/TimeGuessView";
+import { TriviaView } from "@/components/challenge/TriviaView";
 
 export default function ChallengePage() {
   const router = useRouter();
@@ -135,6 +136,26 @@ export default function ChallengePage() {
         if (!best || avg < best.avg) best = { teamId: t.id, avg };
       }
       chosenTeamId = best?.teamId;
+    } else if (challenge === "trivia") {
+      // Most correct wins; tie → earliest submission timestamp.
+      let best: { teamId: string; value: number; completedAt: number } | null =
+        null;
+      for (const t of allTeamsList) {
+        const cur = progressMap[t.id]?.[roundIndex];
+        if (!cur?.completed || cur.completedAt === null) continue;
+        if (
+          !best ||
+          cur.value > best.value ||
+          (cur.value === best.value && cur.completedAt < best.completedAt)
+        ) {
+          best = {
+            teamId: t.id,
+            value: cur.value,
+            completedAt: cur.completedAt,
+          };
+        }
+      }
+      chosenTeamId = best?.teamId;
     } else {
       let best: { teamId: string; completedAt: number } | null = null;
       for (const t of allTeamsList) {
@@ -232,6 +253,9 @@ export default function ChallengePage() {
     case "time-guess":
       view = <TimeGuessView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
       break;
+    case "trivia":
+      view = <TriviaView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
+      break;
   }
 
   const progressLabel = myCur
@@ -248,6 +272,8 @@ export default function ChallengePage() {
       completedAt: tp?.completedAt ?? null,
       perPlayer: tp?.perPlayer,
       guesses: tp?.guesses,
+      triviaAnswers: tp?.triviaAnswers,
+      triviaSubmittedBy: tp?.triviaSubmittedBy,
     };
   });
 
@@ -385,6 +411,7 @@ export default function ChallengePage() {
             mode="all-teams"
             winnerTeamId={winnerForRound}
             code={code}
+            triviaQuestions={round.questions}
           />
         ) : showMyTeamResult ? (
           <RoundResults
@@ -396,6 +423,7 @@ export default function ChallengePage() {
             players={allPlayers}
             mode="my-team"
             code={code}
+            triviaQuestions={round.questions}
           />
         ) : (
           <>

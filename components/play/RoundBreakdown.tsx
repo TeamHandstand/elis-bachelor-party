@@ -51,6 +51,15 @@ function sortEntries(entries: BreakdownEntry[], challenge: ChallengeId): Breakdo
       return avgError(a) - avgError(b);
     });
   }
+  if (challenge === "trivia") {
+    return [...entries].sort((a, b) => {
+      const aDone = a.completedAt !== null;
+      const bDone = b.completedAt !== null;
+      if (aDone !== bDone) return aDone ? -1 : 1;
+      if (a.value !== b.value) return b.value - a.value;
+      return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
+    });
+  }
   return [...entries].sort((a, b) => {
     const aDone = a.completedAt !== null;
     const bDone = b.completedAt !== null;
@@ -78,6 +87,10 @@ function score(
     const guesses = entry.guesses ?? [];
     if (guesses.length === 0) return "no guesses";
     return `±${(avgError(entry) / 1000).toFixed(2)}s avg`;
+  }
+  if (challenge === "trivia") {
+    if (entry.completedAt === null) return "no submit";
+    return `${entry.value} correct`;
   }
   if (entry.completedAt !== null) {
     if (roundStartedAt === null) return def.formatProgress(entry.value, threshold);

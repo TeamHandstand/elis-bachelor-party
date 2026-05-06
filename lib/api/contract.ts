@@ -8,6 +8,8 @@ import type {
   Player,
   RoundConfig,
   Team,
+  TriviaPreset,
+  TriviaQuestion,
 } from "@/lib/types";
 
 // ---------- POST /api/host/login ----------
@@ -252,3 +254,28 @@ export interface EndRoundResponse {
   eventFinished: boolean;
   alreadyDecided: boolean;
 }
+
+// ---------- Trivia presets ----------
+// All endpoints require host-cookie. Presets are global (not event-scoped).
+
+// GET /api/trivia-presets
+export interface ListTriviaPresetsResponse {
+  presets: TriviaPreset[];
+}
+// POST /api/trivia-presets
+export interface CreateTriviaPresetRequest {
+  name: string;
+  questions: TriviaQuestion[];
+}
+export interface CreateTriviaPresetResponse {
+  preset: TriviaPreset;
+}
+// PATCH /api/trivia-presets/:id
+export interface UpdateTriviaPresetRequest {
+  name?: string;
+  questions?: TriviaQuestion[];
+}
+export interface UpdateTriviaPresetResponse {
+  preset: TriviaPreset;
+}
+// DELETE /api/trivia-presets/:id  → { ok: true }

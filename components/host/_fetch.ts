@@ -227,3 +227,43 @@ export async function addPlayer(
     body,
   });
 }
+
+import type {
+  CreateTriviaPresetRequest,
+  CreateTriviaPresetResponse,
+  ListTriviaPresetsResponse,
+  UpdateTriviaPresetRequest,
+  UpdateTriviaPresetResponse,
+} from "@/lib/api/contract";
+
+export async function listTriviaPresets(): Promise<ListTriviaPresetsResponse> {
+  return http<ListTriviaPresetsResponse>("/api/trivia-presets", {
+    method: "GET",
+    cache: "no-store",
+  });
+}
+
+export async function createTriviaPreset(
+  body: CreateTriviaPresetRequest,
+): Promise<CreateTriviaPresetResponse> {
+  return http<CreateTriviaPresetResponse>("/api/trivia-presets", {
+    method: "POST",
+    body,
+  });
+}
+
+export async function updateTriviaPreset(
+  id: string,
+  body: UpdateTriviaPresetRequest,
+): Promise<UpdateTriviaPresetResponse> {
+  return http<UpdateTriviaPresetResponse>(`/api/trivia-presets/${id}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export async function deleteTriviaPreset(id: string): Promise<{ ok: true }> {
+  return http<{ ok: true }>(`/api/trivia-presets/${id}`, {
+    method: "DELETE",
+  });
+}
