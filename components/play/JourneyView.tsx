@@ -24,6 +24,8 @@ import {
 import { EndHeptathlonControls } from "./EndHeptathlonControls";
 import { FinaleLock } from "./FinaleLock";
 import { Confetti } from "./Confetti";
+import { ChampionBanner } from "./ChampionBanner";
+import { RoundBreakdown, type BreakdownEntry } from "./RoundBreakdown";
 import { useCookieHost } from "@/lib/auth/use-cookie-host";
 import type { ChallengeId } from "@/lib/types";
 
@@ -248,22 +250,58 @@ export function JourneyView({ code, myPlayerId }: Props) {
     label: string;
   } | null>(null);
   const [redoBusy, setRedoBusy] = useState(false);
+  const [redoError, setRedoError] = useState<string | null>(null);
 
   function requestRedo(roundIndex: number, label: string) {
     setRedoTarget({ roundIndex, label });
+    setRedoError(null);
   }
 
   async function confirmRedo() {
     if (!redoTarget || redoBusy) return;
     setRedoBusy(true);
+    setRedoError(null);
     try {
-      await resetRound(code, {
+      const res = await resetRound(code, {
         ...(myPlayerId ? { playerId: myPlayerId } : {}),
         roundIndex: redoTarget.roundIndex,
+      });
+      // Apply the server response directly. The round-reset PubNub message
+      // is best-effort and can be lost (publish failure / subscription gap)
+      // so we MUST self-update the store on success — otherwise the user
+      // sees no visible change after tapping confirm. The PubNub message,
+      // if it arrives, is idempotent.
+      const fromIndex = redoTarget.roundIndex;
+      const ev = res.event;
+      const enabled = enabledChallengeOrder(ev.challenges);
+      const toWipe = enabled.slice(fromIndex);
+      const cur = useToastyStore.getState();
+      const newProgress: Record<string, typeof cur.progress[string]> = {};
+      for (const tid of Object.keys(cur.progress)) {
+        const tp = cur.progress[tid];
+        const cleaned = { ...tp };
+        for (const id of toWipe) {
+          cleaned[id] = {
+            value: 0,
+            completed: false,
+            completedAt: null,
+            perPlayer: {},
+            guesses: [],
+          };
+        }
+        newProgress[tid] = cleaned;
+      }
+      useToastyStore.setState({
+        event: ev,
+        progress: newProgress,
+        liveLevels: {},
       });
       setRedoTarget(null);
     } catch (err) {
       console.error("[journey] resetRound failed", err);
+      const message =
+        err instanceof Error ? err.message : "Reset failed";
+      setRedoError(message);
     } finally {
       setRedoBusy(false);
     }
@@ -308,8 +346,23 @@ export function JourneyView({ code, myPlayerId }: Props) {
           />
         )}
       <main className="min-h-screen flex flex-col p-3 safe-top safe-bottom">
-        <TeamHeader />
-        <TeammateOrbit />
+        {event.status === "finished" ? (
+          <ChampionBanner
+            winner={
+              event.winnerTeamId ? teams[event.winnerTeamId] ?? null : null
+            }
+            myTeamId={myTeamId}
+            totalRounds={totalRounds}
+            winsByTeamId={Object.fromEntries(
+              standings.map((s) => [s.team.id, s.wins]),
+            )}
+          />
+        ) : (
+          <>
+            <TeamHeader />
+            <TeammateOrbit />
+          </>
+        )}
 
         {/* Big END / RELEASE affordance — host only. Label changes once all
             rounds are decided so the host knows tapping it locks in the
@@ -431,6 +484,46 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 ? medalForPlace(computeMyPlace(card.challenge))
                 : null;
 
+            // Expandable breakdown for past + current-decided rounds —
+            // shows every team's score/time when the user taps the card.
+            let expandable: React.ReactNode = null;
+            if (
+              card.state.kind === "past" ||
+              card.state.kind === "current-decided"
+            ) {
+              const ch = card.challenge;
+              const def = CHALLENGES[ch];
+              const threshold =
+                event.challenges[ch]?.threshold ?? def.defaultThreshold;
+              const breakdownEntries: BreakdownEntry[] = teamList.map(
+                (t) => {
+                  const tp = progressMap[t.id]?.[ch];
+                  return {
+                    team: t,
+                    value: tp?.value ?? 0,
+                    completedAt: tp?.completedAt ?? null,
+                    guesses: tp?.guesses,
+                  };
+                },
+              );
+              const winnerForRound =
+                winnerByRound[card.ordinal - 1] ?? null;
+              const roundStartedAt =
+                card.state.kind === "current-decided"
+                  ? event.currentRoundStartsAt
+                  : null;
+              expandable = (
+                <RoundBreakdown
+                  challenge={ch}
+                  threshold={threshold}
+                  roundStartedAt={roundStartedAt}
+                  myTeamId={myTeamId}
+                  winnerTeamId={winnerForRound}
+                  entries={breakdownEntries}
+                />
+              );
+            }
+
             return (
               <RoundCard
                 key={card.challenge}
@@ -440,6 +533,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 code={code}
                 isMyTeamWinner={isMyTeamWinner}
                 myMedal={myMedal}
+                expandable={expandable}
               >
                 {hostControls}
               </RoundCard>
@@ -480,6 +574,12 @@ export function JourneyView({ code, myPlayerId }: Props) {
               </div>
             </div>
 
+            {redoError ? (
+              <div className="mt-4 rounded-xl bg-accent-pink/15 border border-accent-pink/40 p-3 text-xs text-accent-pink">
+                ⚠ {redoError}
+              </div>
+            ) : null}
+
             <div className="mt-5 flex flex-col gap-2">
               <button
                 type="button"
@@ -487,7 +587,11 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 disabled={redoBusy}
                 className="w-full py-4 rounded-2xl bg-accent-pink text-white font-display text-base font-extrabold tracking-widest disabled:opacity-50"
               >
-                {redoBusy ? "RESETTING…" : "✓ YES, RESET THIS ROUND"}
+                {redoBusy
+                  ? "RESETTING…"
+                  : redoError
+                    ? "↻ TRY AGAIN"
+                    : "✓ YES, RESET THIS ROUND"}
               </button>
               <button
                 type="button"

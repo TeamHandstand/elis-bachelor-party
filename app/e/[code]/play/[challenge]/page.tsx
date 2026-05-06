@@ -151,11 +151,14 @@ export default function ChallengePage() {
     if (!allDone) return;
     autoEndedRef.current = challenge;
 
-    // For north + time-guess, smallest avg error wins. Server doesn't have
-    // the per-player guess data — pick the winner client-side and pass it
-    // along.
+    // Compute the winning team locally and pass it to the server. The host
+    // device has the freshest view of who finished first (PubNub messages
+    // arrive instantly); flushes to /progress are batched every 2s, so
+    // server-side final_progress can lag behind the auto-end trigger and
+    // miss the actual winner. By passing teamId, we sidestep that race.
     let chosenTeamId: string | undefined;
     if (challenge === "north" || challenge === "time-guess") {
+      // Smallest avg error wins.
       let best: { teamId: string; avg: number } | null = null;
       for (const t of allTeamsList) {
         const guesses =
@@ -165,6 +168,17 @@ export default function ChallengePage() {
         const avg =
           guesses.reduce((s, g) => s + g.errorDeg, 0) / guesses.length;
         if (!best || avg < best.avg) best = { teamId: t.id, avg };
+      }
+      chosenTeamId = best?.teamId;
+    } else {
+      // Accumulator / sustained challenges — earliest team to complete wins.
+      let best: { teamId: string; completedAt: number } | null = null;
+      for (const t of allTeamsList) {
+        const cur = progressMap[t.id]?.[challenge];
+        if (!cur?.completed || cur.completedAt === null) continue;
+        if (!best || cur.completedAt < best.completedAt) {
+          best = { teamId: t.id, completedAt: cur.completedAt };
+        }
       }
       chosenTeamId = best?.teamId;
     }

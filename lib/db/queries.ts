@@ -566,6 +566,11 @@ export async function upsertProgressSnapshot(input: {
 }): Promise<void> {
   if (input.challenges.length === 0) return;
   for (const c of input.challenges) {
+    // completed_at is set by the SERVER (NOW()) on the first transition to
+    // completed=true so cross-device clock skew can't flip the winner-pick.
+    // Once set, COALESCE keeps it stable for subsequent flushes from the
+    // same team. Clients still send completedAt for debugging but we ignore
+    // it for ordering.
     await db.execute(sql`
       INSERT INTO final_progress (event_id, team_id, challenge, value, completed, completed_at)
       VALUES (
@@ -574,12 +579,15 @@ export async function upsertProgressSnapshot(input: {
         ${c.challenge},
         ${String(c.value)},
         ${c.completed},
-        ${c.completedAt ? new Date(c.completedAt).toISOString() : null}
+        CASE WHEN ${c.completed} THEN NOW() ELSE NULL END
       )
       ON CONFLICT (event_id, team_id, challenge) DO UPDATE SET
         value = GREATEST(final_progress.value, EXCLUDED.value),
         completed = final_progress.completed OR EXCLUDED.completed,
-        completed_at = COALESCE(final_progress.completed_at, EXCLUDED.completed_at)
+        completed_at = COALESCE(
+          final_progress.completed_at,
+          CASE WHEN EXCLUDED.completed THEN NOW() ELSE NULL END
+        )
     `);
   }
 }
@@ -663,12 +671,15 @@ export async function tryFinishEvent(input: {
             ${p.challenge},
             ${String(p.value)},
             ${p.completed},
-            ${p.completedAt ? new Date(p.completedAt).toISOString() : null}
+            CASE WHEN ${p.completed} THEN NOW() ELSE NULL END
           )
           ON CONFLICT (event_id, team_id, challenge) DO UPDATE SET
             value = GREATEST(final_progress.value, EXCLUDED.value),
             completed = final_progress.completed OR EXCLUDED.completed,
-            completed_at = COALESCE(final_progress.completed_at, EXCLUDED.completed_at)
+            completed_at = COALESCE(
+              final_progress.completed_at,
+              CASE WHEN EXCLUDED.completed THEN NOW() ELSE NULL END
+            )
         `);
       }
     }

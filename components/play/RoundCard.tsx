@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { CHALLENGES } from "@/lib/challenges";
 import type { ChallengeId, Team } from "@/lib/types";
 
@@ -20,6 +21,10 @@ interface Props {
   // for past + current-decided cards.
   myMedal?: string | null;
   children?: React.ReactNode; // host controls slot
+  // Optional content shown when the card is expanded (only for past /
+  // current-decided states). When provided, the card becomes tappable and
+  // toggles a per-team score breakdown.
+  expandable?: React.ReactNode;
 }
 
 const ORDINAL_GLYPH = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
@@ -32,7 +37,9 @@ export function RoundCard({
   isMyTeamWinner,
   myMedal,
   children,
+  expandable,
 }: Props) {
+  const [expanded, setExpanded] = useState(false);
   const def = CHALLENGES[challenge];
   const glyph = ORDINAL_GLYPH[ordinal - 1] ?? `#${ordinal}`;
 
@@ -111,9 +118,43 @@ export function RoundCard({
     );
   }
 
+  const canExpand = !!expandable && (state.kind === "past" || state.kind === "current-decided");
+
   return (
     <div className={`${baseClasses} ${toneClasses}`}>
-      {inner}
+      {canExpand ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full text-left no-select"
+          aria-expanded={expanded}
+          aria-label={`Toggle round ${ordinal} score breakdown`}
+        >
+          <div className="flex items-center gap-3">
+            <div className="font-display font-extrabold text-2xl opacity-70 w-7 text-center tabular-nums">
+              {glyph}
+            </div>
+            <div className="text-3xl">{def.emoji}</div>
+            <div className="flex-1 min-w-0">
+              <div className="font-display font-extrabold tracking-wider uppercase text-sm truncate">
+                {def.label}
+              </div>
+              <div className="text-[11px] opacity-60 truncate">
+                {expanded ? "tap to hide scores" : "tap to see all team scores"}
+              </div>
+            </div>
+            {trailing}
+            <div className="text-sm opacity-60 ml-1">
+              {expanded ? "▴" : "▾"}
+            </div>
+          </div>
+        </button>
+      ) : (
+        inner
+      )}
+      {canExpand && expanded ? (
+        <div className="mt-3 pt-3 border-t border-white/10">{expandable}</div>
+      ) : null}
       {children}
     </div>
   );
