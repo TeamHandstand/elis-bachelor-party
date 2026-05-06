@@ -15,6 +15,7 @@ import {
 } from "./schema";
 import {
   CHALLENGES,
+  DEFAULT_PUNISHMENT_MESSAGE,
   coerceRounds,
   coerceTriviaQuestions,
   defaultRounds,
@@ -230,12 +231,24 @@ export async function updateEvent(
     // Sanitize per-round trivia questions defensively before persisting so
     // bad client-side state can't poison the jsonb column.
     updates.challenges = patch.rounds.map((r) => {
-      if (r.challenge !== "trivia") return { challenge: r.challenge, threshold: r.threshold };
-      return {
-        challenge: r.challenge,
-        threshold: r.threshold,
-        questions: coerceTriviaQuestions(r.questions ?? []),
-      };
+      if (r.challenge === "trivia") {
+        return {
+          challenge: r.challenge,
+          threshold: r.threshold,
+          questions: coerceTriviaQuestions(r.questions ?? []),
+        };
+      }
+      if (r.challenge === "punishment") {
+        return {
+          challenge: r.challenge,
+          threshold: 0,
+          message:
+            typeof r.message === "string" && r.message.trim()
+              ? r.message
+              : DEFAULT_PUNISHMENT_MESSAGE,
+        };
+      }
+      return { challenge: r.challenge, threshold: r.threshold };
     });
   }
 

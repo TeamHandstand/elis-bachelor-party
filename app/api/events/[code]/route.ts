@@ -22,6 +22,7 @@ const ChallengeIdSchema = z.enum([
   "north",
   "time-guess",
   "trivia",
+  "punishment",
 ]);
 
 // Permissive: incomplete rows (empty prompt / fewer than 2 non-blank
@@ -42,6 +43,9 @@ const RoundConfigSchema = z
     challenge: ChallengeIdSchema,
     threshold: z.number().finite().nonnegative(),
     questions: z.array(TriviaQuestionSchema).max(100).optional(),
+    // Only meaningful for `challenge === "punishment"`. Server-side
+    // coerceRounds backfills a default if missing.
+    message: z.string().max(500).optional(),
   })
   .strict();
 
