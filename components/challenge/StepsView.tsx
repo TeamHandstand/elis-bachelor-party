@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useToastyStore } from "@/lib/store";
 import { usePublisher } from "@/lib/store/bootstrap";
 import { CHALLENGES } from "@/lib/challenges";
 import { StepCounter } from "@/lib/sensors/step-counter";
 import type { Unsubscribe } from "@/lib/sensors/types";
+import { PermissionGate } from "@/components/permissions/PermissionGate";
 
 interface Props {
   code: string;
@@ -13,28 +14,31 @@ interface Props {
   roundIndex: number;
 }
 
-// Smaller batch = display ticks closer to real time. We also short-circuit
-// the batch when the team value is one step away from the threshold.
 const BATCH_SIZE = 2;
 
-type PermState = "idle" | "requesting" | "granted" | "denied";
-
-// iOS Safari only shows the DeviceMotionEvent permission popup in response to
-// a user gesture. Calling it from a useEffect after the wizard has already
-// run won't re-prompt — we have to wait for the player to tap. So we render
-// a giant ENABLE button instead of a tiny error string.
-function isIosMotionGated(): boolean {
-  if (typeof window === "undefined") return false;
-  const ME: any = (window as any).DeviceMotionEvent;
-  return !!ME && typeof ME.requestPermission === "function";
+async function requestStepsPerm(): Promise<boolean> {
+  return new StepCounter().requestPermission();
 }
 
-export function StepsView({ code, myPlayerId, roundIndex }: Props) {
+export function StepsView(props: Props) {
+  return (
+    <PermissionGate
+      icon="📳"
+      label="MOTION"
+      blurb="We need your phone's motion sensor to count steps. Hit ENABLE and say YES."
+      request={requestStepsPerm}
+      iosSetting="Motion & Orientation Access"
+    >
+      <StepsChallenge {...props} />
+    </PermissionGate>
+  );
+}
+
+function StepsChallenge({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
   const event = useToastyStore((s) => s.event);
-  const [perm, setPerm] = useState<PermState>("idle");
   const [stomp, setStomp] = useState(0);
 
   const bufferRef = useRef(0);
@@ -58,81 +62,43 @@ export function StepsView({ code, myPlayerId, roundIndex }: Props) {
     }
   }, [myCreditedSteps]);
 
-  const startListening = useCallback(async () => {
-    if (!myTeamId || unsubRef.current) return;
-    if (!sensorRef.current) sensorRef.current = new StepCounter();
-    unsubRef.current = await sensorRef.current.start(() => {
-      bufferRef.current += 1;
-      setStomp((s) => s + 1);
-      setPendingMine((p) => p + 1);
-      const store = useToastyStore.getState();
-      const ev = store.event;
-      const teamSoFar = Math.floor(
-        store.progress[myTeamId]?.[roundIndex]?.value ?? 0,
-      );
-      const liveThreshold =
-        ev?.rounds[roundIndex]?.threshold ?? CHALLENGES.steps.defaultThreshold;
-      const projected = teamSoFar + bufferRef.current;
-      const reachedThreshold = projected >= liveThreshold;
-      if (bufferRef.current >= BATCH_SIZE || reachedThreshold) {
-        const flush = bufferRef.current;
-        bufferRef.current = 0;
-        publisher({
-          kind: "progress",
-          playerId: myPlayerId,
-          teamId: myTeamId,
-          roundIndex,
-          challenge: "steps",
-          delta: flush,
-          ts: Date.now(),
-        }).catch(() => {});
-      }
-    });
-  }, [myPlayerId, myTeamId, publisher, roundIndex]);
-
-  const requestPermAndStart = useCallback(async () => {
-    setPerm("requesting");
-    if (!sensorRef.current) sensorRef.current = new StepCounter();
-    const ok = await sensorRef.current.requestPermission();
-    if (!ok) {
-      setPerm("denied");
-      return;
-    }
-    setPerm("granted");
-    await startListening();
-  }, [startListening]);
-
-  // On non-iOS (Android, desktop), the permission is implicit — start
-  // immediately. On iOS we wait for the user to tap the button.
   useEffect(() => {
     if (!myTeamId) return;
-    let cancelled = false;
+    if (!sensorRef.current) sensorRef.current = new StepCounter();
+    const sensor = sensorRef.current;
+
     (async () => {
-      if (isIosMotionGated()) {
-        // Try once optimistically — if iOS still has the prompt queued from
-        // the wizard, this resolves; otherwise we fall through to the button.
-        if (!sensorRef.current) sensorRef.current = new StepCounter();
-        try {
-          const ok = await sensorRef.current.requestPermission();
-          if (cancelled) return;
-          if (ok) {
-            setPerm("granted");
-            await startListening();
-          } else {
-            setPerm("denied");
-          }
-        } catch {
-          if (!cancelled) setPerm("denied");
+      // PermissionGate already secured permission before mounting this view.
+      unsubRef.current = await sensor.start(() => {
+        bufferRef.current += 1;
+        setStomp((s) => s + 1);
+        setPendingMine((p) => p + 1);
+        const store = useToastyStore.getState();
+        const ev = store.event;
+        const teamSoFar = Math.floor(
+          store.progress[myTeamId]?.[roundIndex]?.value ?? 0,
+        );
+        const liveThreshold =
+          ev?.rounds[roundIndex]?.threshold ?? CHALLENGES.steps.defaultThreshold;
+        const projected = teamSoFar + bufferRef.current;
+        const reachedThreshold = projected >= liveThreshold;
+        if (bufferRef.current >= BATCH_SIZE || reachedThreshold) {
+          const flush = bufferRef.current;
+          bufferRef.current = 0;
+          publisher({
+            kind: "progress",
+            playerId: myPlayerId,
+            teamId: myTeamId,
+            roundIndex,
+            challenge: "steps",
+            delta: flush,
+            ts: Date.now(),
+          }).catch(() => {});
         }
-      } else {
-        if (cancelled) return;
-        setPerm("granted");
-        await startListening();
-      }
+      });
     })();
 
     return () => {
-      cancelled = true;
       if (bufferRef.current > 0 && myTeamId) {
         const remainder = bufferRef.current;
         bufferRef.current = 0;
@@ -149,53 +115,13 @@ export function StepsView({ code, myPlayerId, roundIndex }: Props) {
       unsubRef.current?.();
       unsubRef.current = null;
     };
-  }, [myPlayerId, myTeamId, publisher, startListening, roundIndex]);
+  }, [myPlayerId, myTeamId, publisher, roundIndex]);
 
   const def = CHALLENGES.steps;
   const threshold =
     event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
   const teamValue = Math.floor(myProgress?.[roundIndex]?.value ?? 0);
-  // Show the team value with our local in-flight steps applied so the
-  // counter ticks on every footfall, not every batch flush.
   const displayedTeam = Math.min(teamValue + pendingMine, threshold);
-
-  if (perm !== "granted") {
-    const denied = perm === "denied";
-    const requesting = perm === "requesting";
-    return (
-      <div className="flex flex-col items-center justify-center flex-1 p-6 text-center gap-4">
-        <div className="text-7xl">📳</div>
-        <div className="font-display text-3xl font-extrabold tracking-wide">
-          {denied ? "MOTION ACCESS BLOCKED" : "ENABLE MOTION"}
-        </div>
-        <div className="text-sm max-w-xs opacity-90">
-          We need your phone&rsquo;s motion sensor to count steps. Tap below
-          and accept the popup.
-        </div>
-        <button
-          type="button"
-          onClick={requestPermAndStart}
-          disabled={requesting}
-          className="w-full max-w-xs py-5 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
-        >
-          {requesting ? "ASKING…" : denied ? "TRY AGAIN" : "ENABLE MOTION"}
-        </button>
-        {denied && (
-          <div className="mt-2 max-w-xs rounded-2xl border-2 border-accent-pink bg-accent-pink/10 p-4 text-left">
-            <div className="font-display text-lg font-extrabold text-accent-pink mb-2">
-              ⚠️ STILL BLOCKED?
-            </div>
-            <div className="text-sm leading-snug">
-              On iPhone: open Settings → Safari → <b>Motion &amp; Orientation
-              Access</b> and turn it ON. Then come back here and tap{" "}
-              <b>TRY AGAIN</b>. If that fails, fully quit Safari from the app
-              switcher and reopen this page.
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col items-center justify-center flex-1 p-6 text-center">

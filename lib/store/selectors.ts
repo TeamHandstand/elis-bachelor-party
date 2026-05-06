@@ -29,6 +29,7 @@ export function useStandings(): Standing[] {
         let completedCount = 0;
         let northErrSum = 0;
         for (let idx = 0; idx < rounds.length; idx++) {
+          if (rounds[idx].challenge === "punishment") continue;
           const cell = tp?.[idx];
           if (cell?.completed) completedCount += 1;
           if (rounds[idx].challenge === "north") {

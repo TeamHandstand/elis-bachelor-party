@@ -7,6 +7,7 @@ import { usePublisher } from "@/lib/store/bootstrap";
 import { CHALLENGES } from "@/lib/challenges";
 import { ShakeDetector } from "@/lib/sensors/shake-detector";
 import type { Unsubscribe } from "@/lib/sensors/types";
+import { PermissionGate } from "@/components/permissions/PermissionGate";
 
 interface Props {
   code: string;
@@ -14,11 +15,29 @@ interface Props {
   roundIndex: number;
 }
 
+async function requestShakePerm(): Promise<boolean> {
+  return new ShakeDetector().requestPermission();
+}
+
+export function ShakeView(props: Props) {
+  return (
+    <PermissionGate
+      icon="📳"
+      label="MOTION"
+      blurb="We need your phone's motion sensor to detect shaking. Hit ENABLE and say YES."
+      request={requestShakePerm}
+      iosSetting="Motion & Orientation Access"
+    >
+      <ShakeChallenge {...props} />
+    </PermissionGate>
+  );
+}
+
 const PUBLISH_INTERVAL_MS = 250;
 // ShakeDetector emits |mag - 9.8|; "12 m/s² magnitude" => deviation ~2.2.
 const SHAKE_DEVIATION = 2.2;
 
-export function ShakeView({ code, myPlayerId, roundIndex }: Props) {
+function ShakeChallenge({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const teammates = useTeammates();
@@ -26,7 +45,6 @@ export function ShakeView({ code, myPlayerId, roundIndex }: Props) {
   const event = useToastyStore((s) => s.event);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
 
-  const [permError, setPermError] = useState(false);
   const [myLevel, setMyLevel] = useState(0);
   const [completeSent, setCompleteSent] = useState(false);
 
@@ -46,11 +64,7 @@ export function ShakeView({ code, myPlayerId, roundIndex }: Props) {
     let cancelled = false;
 
     (async () => {
-      const ok = await sensor.requestPermission();
-      if (!ok) {
-        setPermError(true);
-        return;
-      }
+      // PermissionGate already secured permission before mounting this view.
       if (cancelled) return;
       unsub = await sensor.start((level) => {
         lastLevelRef.current = level;
@@ -159,12 +173,6 @@ export function ShakeView({ code, myPlayerId, roundIndex }: Props) {
           </div>
         )}
       </div>
-
-      {permError && (
-        <div className="mt-4 text-accent-pink text-xs text-center">
-          Motion access denied. iOS — refresh & accept.
-        </div>
-      )}
     </div>
   );
 }

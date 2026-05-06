@@ -188,6 +188,7 @@ export default async function ResultsPage({ params }: PageProps) {
               const def = CHALLENGES[r.challenge];
               const w = winnersByRound[idx];
               const winningTeam = w ? teams.find((t) => t.id === w.teamId) : null;
+              const isPunishment = r.challenge === "punishment";
               return (
                 <li
                   key={`${idx}-${r.challenge}`}
@@ -199,7 +200,15 @@ export default async function ResultsPage({ params }: PageProps) {
                   <div className="text-2xl">{def.emoji}</div>
                   <div className="flex-1 truncate font-bold">{def.label}</div>
                   <div>
-                    {winningTeam ? (
+                    {isPunishment ? (
+                      winningTeam ? (
+                        <span>
+                          💀 {winningTeam.emoji} {winningTeam.name}
+                        </span>
+                      ) : (
+                        <span className="opacity-60">💀 everyone</span>
+                      )
+                    ) : winningTeam ? (
                       <span>
                         🥇 {winningTeam.emoji} {winningTeam.name}
                       </span>

@@ -11,8 +11,9 @@ import { TeamHeader } from "@/components/dashboard/TeamHeader";
 import { TeammateOrbit } from "@/components/dashboard/TeammateOrbit";
 import { RoundCard, type RoundCardState } from "./RoundCard";
 import { HostRoundControls, type EndPickerEntry } from "./HostRoundControls";
-import { CHALLENGES } from "@/lib/challenges";
+import { CHALLENGES, DEFAULT_PUNISHMENT_MESSAGE } from "@/lib/challenges";
 import { CountdownOverlay } from "./CountdownOverlay";
+import { PunishmentTakeover } from "./PunishmentTakeover";
 import Link from "next/link";
 import {
   endEvent,
@@ -96,6 +97,16 @@ export function JourneyView({ code, myPlayerId }: Props) {
       setShowCountdown(false);
       return;
     }
+    // Punishment rounds skip the 3-2-1 countdown and the redirect to
+    // /play/[idx] — the takeover overlay rendered below is the entire UX.
+    const curIdx = event.currentRoundIndex;
+    if (
+      curIdx !== null &&
+      event.rounds[curIdx]?.challenge === "punishment"
+    ) {
+      setShowCountdown(false);
+      return;
+    }
     if (Date.now() < startsAt) {
       setShowCountdown(true);
     } else {
@@ -174,19 +185,25 @@ export function JourneyView({ code, myPlayerId }: Props) {
     // No round in flight — start the next one without a winner.
     const nextIdx = event.roundWinners.length;
     if (nextIdx < totalRounds) {
+      const isPunish = event.rounds[nextIdx]?.challenge === "punishment";
       startTarget = {
         ordinal: nextIdx + 1,
-        label:
-          nextIdx === 0 ? "START ROUND 1" : `START ROUND ${nextIdx + 1}`,
+        label: isPunish
+          ? `💀 PUNISH NOW`
+          : nextIdx === 0
+            ? "START ROUND 1"
+            : `START ROUND ${nextIdx + 1}`,
       };
     }
   } else if (
     currentStatus === "decided" &&
     (currentIdx ?? -1) + 1 < totalRounds
   ) {
+    const nextIdx = (currentIdx ?? 0) + 1;
+    const isPunish = event.rounds[nextIdx]?.challenge === "punishment";
     startTarget = {
-      ordinal: (currentIdx ?? 0) + 2,
-      label: `START ROUND ${(currentIdx ?? 0) + 2}`,
+      ordinal: nextIdx + 1,
+      label: isPunish ? `💀 PUNISH NOW` : `START ROUND ${nextIdx + 1}`,
     };
   }
 
@@ -214,6 +231,41 @@ export function JourneyView({ code, myPlayerId }: Props) {
       });
     } catch (err) {
       console.error("[journey] endRound failed", err);
+    }
+  }
+
+  // Pick the team currently in last place — used to call out who has to do
+  // the punishment. Standings exclude punishment rounds, so this reflects
+  // only the real challenges decided so far. If every team is tied (e.g.,
+  // punishment is the very first round), return null → "everyone drinks".
+  function pickLosingTeam() {
+    if (standings.length < 2) return null;
+    const top = standings[0].points;
+    const bottom = standings[standings.length - 1].points;
+    if (top === bottom) return null;
+    return standings[standings.length - 1].team;
+  }
+
+  const [punishmentBusy, setPunishmentBusy] = useState(false);
+
+  async function handleCompletePunishment() {
+    if (punishmentBusy) return;
+    setPunishmentBusy(true);
+    try {
+      // Mark the round decided. The `winnerTeamId` here is just the team that
+      // got punished — scoring ignores punishment rounds, so this entry is
+      // essentially a marker. Sending the losing team's id keeps the journey
+      // history readable ("Round 3 · 💀 hit Team Alpha").
+      const losing = pickLosingTeam();
+      await endRound(code, {
+        mode: "host",
+        ...(myPlayerId ? { playerId: myPlayerId } : {}),
+        ...(losing ? { teamId: losing.id } : {}),
+      });
+    } catch (err) {
+      console.error("[journey] complete punishment failed", err);
+    } finally {
+      setPunishmentBusy(false);
     }
   }
 
@@ -313,6 +365,30 @@ export function JourneyView({ code, myPlayerId }: Props) {
             }}
           />
         )}
+      {currentIdx !== null &&
+        currentStatus === "live" &&
+        event.rounds[currentIdx]?.challenge === "punishment" && (
+          <PunishmentTakeover
+            ordinal={currentIdx + 1}
+            message={
+              event.rounds[currentIdx]?.message ?? DEFAULT_PUNISHMENT_MESSAGE
+            }
+            losingTeam={pickLosingTeam()}
+            myTeamId={myTeamId}
+            hostControls={
+              isHost ? (
+                <button
+                  type="button"
+                  onClick={handleCompletePunishment}
+                  disabled={punishmentBusy}
+                  className="w-full py-4 rounded-2xl bg-white text-[#5b0010] font-display text-base font-extrabold tracking-widest disabled:opacity-50"
+                >
+                  {punishmentBusy ? "ENDING…" : "✓ PUNISHMENT COMPLETE"}
+                </button>
+              ) : undefined
+            }
+          />
+        )}
       <main className="min-h-screen flex flex-col p-3 safe-top safe-bottom">
         {event.status === "finished" ? (
           <ChampionBanner
@@ -398,19 +474,26 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 ? card.state.winner?.id === myTeamId
                 : false;
 
+            const isPunishment = round.challenge === "punishment";
+
             let hostControls: React.ReactNode = null;
             if (isHost && event.status !== "finished") {
               if (card.state.kind === "current-live") {
-                hostControls = (
-                  <HostRoundControls
-                    variant={{
-                      kind: "end",
-                      entries: endPickerEntries,
-                      challenge: round.challenge,
-                    }}
-                    onEnd={handleEnd}
-                  />
-                );
+                // Live punishment: the takeover overlay rendered above the
+                // journey owns the "Complete" button — skip the in-card
+                // controls so the host doesn't see two buttons.
+                if (!isPunishment) {
+                  hostControls = (
+                    <HostRoundControls
+                      variant={{
+                        kind: "end",
+                        entries: endPickerEntries,
+                        challenge: round.challenge,
+                      }}
+                      onEnd={handleEnd}
+                    />
+                  );
+                }
               } else if (card.state.kind === "current-decided") {
                 hostControls = (
                   <HostRoundControls
@@ -459,10 +542,12 @@ export function JourneyView({ code, myPlayerId }: Props) {
 
             // Expandable breakdown for past + current-decided rounds —
             // shows every team's score/time when the user taps the card.
+            // Punishments have no per-team breakdown, so skip.
             let expandable: React.ReactNode = null;
             if (
-              card.state.kind === "past" ||
-              card.state.kind === "current-decided"
+              !isPunishment &&
+              (card.state.kind === "past" ||
+                card.state.kind === "current-decided")
             ) {
               const def = CHALLENGES[round.challenge];
               const threshold = round.threshold ?? def.defaultThreshold;

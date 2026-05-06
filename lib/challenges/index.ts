@@ -107,7 +107,23 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
       "Whole team picks answers together (live synced) and submits one block. Most correct wins; tie → earliest submit.",
     formatProgress: (v) => `${Math.floor(v)} correct`,
   },
+  punishment: {
+    id: "punishment",
+    label: "Punishment",
+    emoji: "💀",
+    defaultThreshold: 0,
+    unit: "",
+    // Aggregation is meaningless here — punishment rounds don't track team
+    // progress. Pick a value to keep the type happy.
+    aggregation: "team-block",
+    description:
+      "Losing team gets called out on a fullscreen takeover. Host marks complete.",
+    formatProgress: () => "",
+  },
 };
+
+export const DEFAULT_PUNISHMENT_MESSAGE =
+  "LOSING TEAM MUST TAKE A SHOT OF FIREBALL, NOW!";
 
 /**
  * Big imperative command shown at the top of each round-play page so players
@@ -143,6 +159,8 @@ export function challengeCommand(id: ChallengeId, threshold: number): string {
     }
     case "trivia":
       return `Pick answers together — most correct wins! (Tie → earliest submit.)`;
+    case "punishment":
+      return `Losing team — your time has come.`;
   }
 }
 
@@ -214,9 +232,19 @@ export function challengeForRound(
  * Whether the challenge is one whose threshold is host-tunable. Trivia and
  * north are the exceptions: trivia is scored by correct count vs. its own
  * embedded question list, north by avg angular error with one guess each.
+ * Punishment has no threshold either — it's a non-scoring round.
  */
 export function challengeHasThreshold(id: ChallengeId): boolean {
-  return id !== "north" && id !== "trivia";
+  return id !== "north" && id !== "trivia" && id !== "punishment";
+}
+
+/**
+ * True for the special "punishment" round type. These don't contribute to
+ * scoring and have a different live UX (fullscreen takeover, host-marked
+ * complete instead of a winner picker).
+ */
+export function isPunishmentRound(id: ChallengeId): boolean {
+  return id === "punishment";
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +379,12 @@ export function coerceRounds(raw: unknown): RoundConfig[] {
       const ch = (item as { challenge?: unknown }).challenge;
       const th = (item as { threshold?: unknown }).threshold;
       if (typeof ch !== "string") continue;
-      if (!CHALLENGE_ORDER.includes(ch as ChallengeId)) continue;
+      if (
+        !CHALLENGE_ORDER.includes(ch as ChallengeId) &&
+        ch !== "punishment"
+      ) {
+        continue;
+      }
       const challenge = ch as ChallengeId;
       const threshold =
         typeof th === "number" && Number.isFinite(th)
@@ -362,6 +395,13 @@ export function coerceRounds(raw: unknown): RoundConfig[] {
         round.questions = coerceTriviaQuestions(
           (item as { questions?: unknown }).questions,
         );
+      }
+      if (challenge === "punishment") {
+        const msg = (item as { message?: unknown }).message;
+        round.message =
+          typeof msg === "string" && msg.trim()
+            ? msg
+            : DEFAULT_PUNISHMENT_MESSAGE;
       }
       out.push(round);
     }

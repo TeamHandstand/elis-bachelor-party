@@ -9,6 +9,23 @@ import { normalizeEventCode } from "@/lib/utils/code";
 import { JourneyView } from "@/components/play/JourneyView";
 import { PermissionWizard } from "@/components/permissions/PermissionWizard";
 
+// iOS Safari clears DeviceMotion / DeviceOrientation grants on every full
+// page reload, so persisting the wizard "done" flag in localStorage would
+// hide the wizard while the actual grants are gone. Track completion in
+// module-level memory instead — survives SPA route changes (lobby ↔ play),
+// but resets on full reload, which is exactly when iOS needs the wizard back.
+const iosWizardDone = new Set<string>();
+
+function isIosGesturePerm(): boolean {
+  if (typeof window === "undefined") return false;
+  const ME: any = (window as any).DeviceMotionEvent;
+  const OE: any = (window as any).DeviceOrientationEvent;
+  return (
+    (ME && typeof ME.requestPermission === "function") ||
+    (OE && typeof OE.requestPermission === "function")
+  );
+}
+
 export default function PlayPage() {
   const router = useRouter();
   const params = useParams<{ code: string }>();
@@ -26,7 +43,10 @@ export default function PlayPage() {
       return;
     }
     setMyPlayerId(id);
-    const permsDone = localStorage.getItem(`toasty-permissions-${code}`) === "1";
+    const ios = isIosGesturePerm();
+    const permsDone = ios
+      ? iosWizardDone.has(code)
+      : localStorage.getItem(`toasty-permissions-${code}`) === "1";
     setShowPerms(!permsDone);
     setHydrated(true);
   }, [code, router]);
@@ -82,10 +102,14 @@ export default function PlayPage() {
       {showPerms && (
         <PermissionWizard
           onComplete={() => {
-            try {
-              localStorage.setItem(`toasty-permissions-${code}`, "1");
-            } catch {
-              /* ignore */
+            if (isIosGesturePerm()) {
+              iosWizardDone.add(code);
+            } else {
+              try {
+                localStorage.setItem(`toasty-permissions-${code}`, "1");
+              } catch {
+                /* ignore */
+              }
             }
             setShowPerms(false);
           }}

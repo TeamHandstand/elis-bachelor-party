@@ -6,11 +6,30 @@ import { usePublisher } from "@/lib/store/bootstrap";
 import { CHALLENGES } from "@/lib/challenges";
 import { RotationCounter } from "@/lib/sensors/rotation-counter";
 import type { Unsubscribe } from "@/lib/sensors/types";
+import { PermissionGate } from "@/components/permissions/PermissionGate";
 
 interface Props {
   code: string;
   myPlayerId: string;
   roundIndex: number;
+}
+
+async function requestRotationPerm(): Promise<boolean> {
+  return new RotationCounter().requestPermission();
+}
+
+export function SpinView(props: Props) {
+  return (
+    <PermissionGate
+      icon="🌀"
+      label="MOTION"
+      blurb="We need your phone's orientation sensor to count rotations. Hit ENABLE and say YES."
+      request={requestRotationPerm}
+      iosSetting="Motion & Orientation Access"
+    >
+      <SpinChallenge {...props} />
+    </PermissionGate>
+  );
 }
 
 const PUBLISH_INTERVAL_MS = 250;
@@ -19,13 +38,12 @@ const FULL_ROTATION = 360;
 // any motion has been seen. Smaller threshold = more responsive teamwise.
 const PUBLISH_DEGREES = 15;
 
-export function SpinView({ code, myPlayerId, roundIndex }: Props) {
+function SpinChallenge({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
   const event = useToastyStore((s) => s.event);
 
-  const [permError, setPermError] = useState(false);
   const [leftDown, setLeftDown] = useState(false);
   const [rightDown, setRightDown] = useState(false);
 
@@ -68,11 +86,7 @@ export function SpinView({ code, myPlayerId, roundIndex }: Props) {
     let cancelled = false;
 
     (async () => {
-      const ok = await sensor.requestPermission();
-      if (!ok) {
-        setPermError(true);
-        return;
-      }
+      // PermissionGate already secured permission before mounting this view.
       if (cancelled) return;
       unsub = await sensor.start((deltaDeg) => {
         bufferDegRef.current += deltaDeg;
@@ -188,12 +202,6 @@ export function SpinView({ code, myPlayerId, roundIndex }: Props) {
           <div className="px-4 py-2 rounded-full bg-accent-orange text-bg font-extrabold tracking-widest text-sm">
             PAUSED
           </div>
-        </div>
-      )}
-
-      {permError && (
-        <div className="text-accent-pink text-xs text-center pb-2">
-          Compass denied. iOS — refresh & accept.
         </div>
       )}
     </div>

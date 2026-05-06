@@ -53,6 +53,8 @@ function thresholdLabel(challenge: ChallengeId, threshold: number): string {
       return `target ${(threshold / 1000).toFixed(0)}s`;
     case "trivia":
       return "most correct wins";
+    case "punishment":
+      return "non-scoring";
   }
 }
 
@@ -71,6 +73,7 @@ export function RoundCard({
   const [expanded, setExpanded] = useState(false);
   const def = CHALLENGES[challenge];
   const glyph = ORDINAL_GLYPH[ordinal - 1] ?? `#${ordinal}`;
+  const isPunishment = challenge === "punishment";
 
   const baseClasses = "rounded-2xl p-4 transition-all";
   let toneClasses = "";
@@ -78,40 +81,77 @@ export function RoundCard({
 
   switch (state.kind) {
     case "past":
-      toneClasses = "bg-bg-card text-white border border-white/10";
-      trailing = state.winner ? (
-        <div className="flex items-center gap-2">
-          <span className="text-xl" aria-label="your team's medal">
-            {myMedal ?? "🥇"}
-          </span>
-          <span className="text-2xl">{state.winner.emoji}</span>
-        </div>
-      ) : null;
+      toneClasses = isPunishment
+        ? "bg-accent-pink/10 text-white border border-accent-pink/30"
+        : "bg-bg-card text-white border border-white/10";
+      trailing = isPunishment
+        ? state.winner
+          ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xl">💀</span>
+              <span className="text-2xl">{state.winner.emoji}</span>
+            </div>
+          )
+          : <span className="text-xl">💀</span>
+        : state.winner ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xl" aria-label="your team's medal">
+                {myMedal ?? "🥇"}
+              </span>
+              <span className="text-2xl">{state.winner.emoji}</span>
+            </div>
+          ) : null;
       break;
     case "current-decided":
-      toneClasses = "bg-bg-card text-white border-2 border-accent-orange/40";
-      trailing = state.winner ? (
-        <div className="flex items-center gap-2">
-          <span className="text-xl" aria-label="your team's medal">
-            {myMedal ?? "🥇"}
-          </span>
-          <span className="text-2xl">{state.winner.emoji}</span>
-        </div>
-      ) : null;
+      toneClasses = isPunishment
+        ? "bg-accent-pink/10 text-white border-2 border-accent-pink/40"
+        : "bg-bg-card text-white border-2 border-accent-orange/40";
+      trailing = isPunishment
+        ? state.winner
+          ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xl">💀</span>
+              <span className="text-2xl">{state.winner.emoji}</span>
+            </div>
+          )
+          : <span className="text-xl">💀</span>
+        : state.winner ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xl" aria-label="your team's medal">
+                {myMedal ?? "🥇"}
+              </span>
+              <span className="text-2xl">{state.winner.emoji}</span>
+            </div>
+          ) : null;
       break;
     case "current-live":
-      toneClasses =
-        "bg-bg-card text-white border-2 border-accent-orange shadow-[0_0_24px_rgba(255,140,66,0.45)]";
+      toneClasses = isPunishment
+        ? "bg-accent-pink/15 text-white border-2 border-accent-pink shadow-[0_0_24px_rgba(255,107,138,0.45)]"
+        : "bg-bg-card text-white border-2 border-accent-orange shadow-[0_0_24px_rgba(255,140,66,0.45)]";
       trailing = (
-        <div className="text-[10px] font-extrabold tracking-widest uppercase text-accent-orange flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-accent-orange animate-pulse" />
-          LIVE
+        <div
+          className={`text-[10px] font-extrabold tracking-widest uppercase flex items-center gap-1 ${
+            isPunishment ? "text-accent-pink" : "text-accent-orange"
+          }`}
+        >
+          <span
+            className={`w-2 h-2 rounded-full animate-pulse ${
+              isPunishment ? "bg-accent-pink" : "bg-accent-orange"
+            }`}
+          />
+          {isPunishment ? "PUNISHMENT" : "LIVE"}
         </div>
       );
       break;
     case "future":
-      toneClasses = "bg-bg-deep text-white/80 border border-white/10";
-      trailing = <div className="text-xl">🔒</div>;
+      toneClasses = isPunishment
+        ? "bg-bg-deep text-white/80 border border-accent-pink/30"
+        : "bg-bg-deep text-white/80 border border-white/10";
+      trailing = isPunishment ? (
+        <div className="text-xl">💀</div>
+      ) : (
+        <div className="text-xl">🔒</div>
+      );
       break;
   }
 
@@ -121,15 +161,19 @@ export function RoundCard({
 
   const isLocked = state.kind === "future";
   const subtitle = isLocked
-    ? `Round ${ordinal} · ???`
-    : `${def.label} · ${thresholdLabel(challenge, threshold)}`;
+    ? isPunishment
+      ? `Round ${ordinal} · 💀 PUNISHMENT INCOMING`
+      : `Round ${ordinal} · ???`
+    : isPunishment
+      ? `💀 Punishment · ${thresholdLabel(challenge, threshold)}`
+      : `${def.label} · ${thresholdLabel(challenge, threshold)}`;
 
   const inner = (
     <div className="flex items-center gap-3">
       <div className="font-display font-extrabold text-2xl opacity-70 w-7 text-center tabular-nums">
         {glyph}
       </div>
-      <div className="text-3xl">{isLocked ? "❓" : def.emoji}</div>
+      <div className="text-3xl">{isLocked && !isPunishment ? "❓" : def.emoji}</div>
       <div className="flex-1 min-w-0">
         <div className="font-display font-extrabold tracking-wider uppercase text-sm truncate">
           {subtitle}
@@ -143,6 +187,16 @@ export function RoundCard({
   );
 
   if (state.kind === "current-live") {
+    // Punishment rounds have no /play/[idx] view — the takeover overlay is
+    // the entire UX. Render as a static card instead of a Link.
+    if (isPunishment) {
+      return (
+        <div className={`${baseClasses} ${toneClasses}`}>
+          {inner}
+          {children}
+        </div>
+      );
+    }
     return (
       <Link
         href={`/e/${code}/play/${roundIndex}`}

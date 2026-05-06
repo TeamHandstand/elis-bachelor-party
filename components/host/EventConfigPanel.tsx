@@ -26,6 +26,7 @@ import type { UpdateEventRequest } from "@/lib/api/contract";
 import {
   CHALLENGE_ORDER,
   CHALLENGES,
+  DEFAULT_PUNISHMENT_MESSAGE,
   challengeHasThreshold,
 } from "@/lib/challenges";
 import { patchEvent } from "./_fetch";
@@ -132,10 +133,18 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
 
   function addRound(challenge: ChallengeId) {
     const def = CHALLENGES[challenge];
-    const round: RoundConfig =
-      challenge === "trivia"
-        ? { challenge, threshold: def.defaultThreshold, questions: [] }
-        : { challenge, threshold: def.defaultThreshold };
+    let round: RoundConfig;
+    if (challenge === "trivia") {
+      round = { challenge, threshold: def.defaultThreshold, questions: [] };
+    } else if (challenge === "punishment") {
+      round = {
+        challenge,
+        threshold: 0,
+        message: DEFAULT_PUNISHMENT_MESSAGE,
+      };
+    } else {
+      round = { challenge, threshold: def.defaultThreshold };
+    }
     applyRows([...rows, { id: newRowId(), round }]);
   }
 
@@ -280,8 +289,59 @@ function SortableRoundRow({
 
   const showThreshold = challengeHasThreshold(round.challenge);
   const isTrivia = round.challenge === "trivia";
+  const isPunishment = round.challenge === "punishment";
   const triviaCount = round.questions?.length ?? 0;
   const selectId = useId();
+
+  if (isPunishment) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className="py-3 flex flex-wrap items-stretch gap-3 bg-accent-pink/10 -mx-2 px-2 rounded-xl border border-accent-pink/40"
+      >
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          aria-label="Drag to reorder"
+          className="cursor-grab touch-none px-2 py-1 rounded-lg bg-bg-deep border border-accent-pink/40 text-sm font-bold opacity-80 hover:opacity-100 self-start"
+        >
+          ⋮⋮
+        </button>
+        <div className="font-display font-extrabold text-lg text-accent-pink w-6 text-center tabular-nums self-start mt-1">
+          {ordinal}
+        </div>
+        <div className="flex flex-col gap-1.5 flex-1 min-w-[200px]">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">💀</span>
+            <span className="font-display font-extrabold tracking-widest text-accent-pink text-xs uppercase">
+              Punishment Line
+            </span>
+          </div>
+          <textarea
+            value={round.message ?? ""}
+            onChange={(e) => onChange({ message: e.target.value })}
+            rows={2}
+            placeholder="Punishment message…"
+            className="w-full rounded-lg bg-bg-deep border border-accent-pink/40 px-3 py-2 outline-none focus:border-accent-pink text-sm font-bold resize-none"
+          />
+          <div className="text-[11px] opacity-60">
+            When live: losing team gets called out fullscreen — host marks
+            complete to advance. Doesn&rsquo;t affect scoring.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove punishment"
+          className="px-3 py-2 rounded-lg bg-bg-deep border border-accent-pink/40 text-sm font-bold opacity-80 hover:opacity-100 hover:text-accent-pink self-start"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -386,25 +446,40 @@ function SortableRoundRow({
 
 function AddRoundBar({ onAdd }: { onAdd: (id: ChallengeId) => void }) {
   return (
-    <div className="pt-3 border-t border-white/5">
-      <div className="text-[11px] uppercase tracking-widest opacity-60 mb-2 font-bold">
-        ➕ add a round
+    <div className="pt-3 border-t border-white/5 space-y-3">
+      <div>
+        <div className="text-[11px] uppercase tracking-widest opacity-60 mb-2 font-bold">
+          ➕ add a round
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {CHALLENGE_ORDER.map((id) => {
+            const def = CHALLENGES[id];
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onAdd(id)}
+                className="px-3 py-2 rounded-xl bg-bg-deep border border-white/10 hover:border-accent-pink text-sm font-bold flex items-center gap-2"
+              >
+                <span className="text-base">{def.emoji}</span>
+                <span>{def.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div className="flex flex-wrap gap-2">
-        {CHALLENGE_ORDER.map((id) => {
-          const def = CHALLENGES[id];
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onAdd(id)}
-              className="px-3 py-2 rounded-xl bg-bg-deep border border-white/10 hover:border-accent-pink text-sm font-bold flex items-center gap-2"
-            >
-              <span className="text-base">{def.emoji}</span>
-              <span>{def.label}</span>
-            </button>
-          );
-        })}
+      <div>
+        <div className="text-[11px] uppercase tracking-widest text-accent-pink/80 mb-2 font-bold">
+          💀 drop in a punishment
+        </div>
+        <button
+          type="button"
+          onClick={() => onAdd("punishment")}
+          className="px-3 py-2 rounded-xl bg-accent-pink/15 border border-accent-pink/50 hover:bg-accent-pink/25 text-sm font-extrabold tracking-wide flex items-center gap-2 text-accent-pink"
+        >
+          <span className="text-base">💀</span>
+          <span>Add Punishment Line</span>
+        </button>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import { usePublisher } from "@/lib/store/bootstrap";
 import { CHALLENGES } from "@/lib/challenges";
 import { DbMeter } from "@/lib/sensors/db-meter";
 import type { Unsubscribe } from "@/lib/sensors/types";
+import { PermissionGate } from "@/components/permissions/PermissionGate";
 
 interface Props {
   code: string;
@@ -17,7 +18,32 @@ interface Props {
 const PUBLISH_INTERVAL_MS = 250;
 const SCREAM_DB = 80;
 
-export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
+export function ScreamView(props: Props) {
+  // Share a single DbMeter between the gate and the challenge body. The gate
+  // calls requestPermission() (which opens the mic + AudioContext); the
+  // challenge body reuses the already-warm instance to call start().
+  const sensorRef = useRef<DbMeter | null>(null);
+  if (!sensorRef.current) sensorRef.current = new DbMeter();
+  return (
+    <PermissionGate
+      icon="🎤"
+      label="MIC"
+      blurb="We need your phone's mic to hear how loud you scream. Hit ENABLE and say YES."
+      request={() => sensorRef.current!.requestPermission()}
+      iosSetting="Microphone"
+      requireUserGesture
+    >
+      <ScreamChallenge {...props} sensor={sensorRef.current} />
+    </PermissionGate>
+  );
+}
+
+function ScreamChallenge({
+  code,
+  myPlayerId,
+  roundIndex,
+  sensor,
+}: Props & { sensor: DbMeter }) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const teammates = useTeammates();
@@ -25,7 +51,6 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
   const event = useToastyStore((s) => s.event);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
 
-  const [permError, setPermError] = useState(false);
   const [myLevel, setMyLevel] = useState(0);
   const [completeSent, setCompleteSent] = useState(false);
 
@@ -40,16 +65,11 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
 
   useEffect(() => {
     if (!myTeamId) return;
-    const sensor = new DbMeter();
     let unsub: Unsubscribe | null = null;
     let cancelled = false;
 
     (async () => {
-      const ok = await sensor.requestPermission();
-      if (!ok) {
-        setPermError(true);
-        return;
-      }
+      // PermissionGate already opened the mic + AudioContext on this instance.
       if (cancelled) return;
       unsub = await sensor.start((level) => {
         lastLevelRef.current = level;
@@ -74,7 +94,7 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
       cancelled = true;
       unsub?.();
     };
-  }, [myPlayerId, myTeamId, publisher, roundIndex]);
+  }, [myPlayerId, myTeamId, publisher, roundIndex, sensor]);
 
   // Detect "all teammates above 80dB sustained for `threshold` seconds" and publish complete.
   useEffect(() => {
@@ -167,12 +187,6 @@ export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
           </div>
         )}
       </div>
-
-      {permError && (
-        <div className="mt-4 text-accent-pink text-xs text-center">
-          Mic denied. We can’t hear your screams. Refresh & allow.
-        </div>
-      )}
     </div>
   );
 }

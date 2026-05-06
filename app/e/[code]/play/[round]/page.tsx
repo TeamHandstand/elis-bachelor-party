@@ -99,7 +99,9 @@ export default function ChallengePage() {
     if (event?.status === "finished") router.replace(`/e/${code}/play`);
   }, [event?.status, code, router]);
 
-  // If this round isn't the live one, bounce back to journey.
+  // If this round isn't the live one, bounce back to journey. Punishment
+  // rounds also live entirely on the journey (fullscreen takeover overlay),
+  // so /play/[idx] never renders for them.
   useEffect(() => {
     if (!event) return;
     if (event.currentRoundIndex === null) {
@@ -107,6 +109,10 @@ export default function ChallengePage() {
       return;
     }
     if (event.currentRoundIndex !== roundIndex) {
+      router.replace(`/e/${code}/play`);
+      return;
+    }
+    if (event.rounds[roundIndex]?.challenge === "punishment") {
       router.replace(`/e/${code}/play`);
     }
   }, [event?.currentRoundIndex, event, roundIndex, router, code]);
@@ -116,6 +122,7 @@ export default function ChallengePage() {
   useEffect(() => {
     if (!isHost || !event || !challenge) return;
     if (event.currentRoundStatus !== "live") return;
+    if (challenge === "punishment") return;
     if (autoEndedRef.current === roundIndex) return;
     const allTeamsList = Object.values(teamsMap);
     if (allTeamsList.length === 0) return;
@@ -212,6 +219,16 @@ export default function ChallengePage() {
         >
           ← back
         </Link>
+      </main>
+    );
+  }
+
+  // Punishment rounds are owned by the journey's takeover overlay — bounce
+  // out before rendering any per-challenge chrome.
+  if (challenge === "punishment") {
+    return (
+      <main className="min-h-screen flex items-center justify-center text-center">
+        <div className="text-5xl animate-spin">💀</div>
       </main>
     );
   }

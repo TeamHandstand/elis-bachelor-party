@@ -6,6 +6,7 @@ import { usePublisher } from "@/lib/store/bootstrap";
 import { CHALLENGES } from "@/lib/challenges";
 import { DistanceTracker } from "@/lib/sensors/distance";
 import type { Unsubscribe } from "@/lib/sensors/types";
+import { PermissionGate } from "@/components/permissions/PermissionGate";
 
 interface Props {
   code: string;
@@ -15,12 +16,29 @@ interface Props {
 
 const PUBLISH_THRESHOLD_M = 5;
 
-export function DistanceView({ code, myPlayerId, roundIndex }: Props) {
+async function requestGeoPerm(): Promise<boolean> {
+  return new DistanceTracker().requestPermission();
+}
+
+export function DistanceView(props: Props) {
+  return (
+    <PermissionGate
+      icon="📍"
+      label="LOCATION"
+      blurb="We need GPS to count miles walked. Hit ENABLE and say YES."
+      request={requestGeoPerm}
+      iosSetting="Location"
+    >
+      <DistanceChallenge {...props} />
+    </PermissionGate>
+  );
+}
+
+function DistanceChallenge({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
   const event = useToastyStore((s) => s.event);
-  const [permError, setPermError] = useState(false);
   const [pulse, setPulse] = useState(0);
 
   const bufferRef = useRef(0);
@@ -32,11 +50,7 @@ export function DistanceView({ code, myPlayerId, roundIndex }: Props) {
     let cancelled = false;
 
     (async () => {
-      const ok = await sensor.requestPermission();
-      if (!ok) {
-        setPermError(true);
-        return;
-      }
+      // PermissionGate already secured permission before mounting this view.
       if (cancelled) return;
       unsub = await sensor.start((delta) => {
         bufferRef.current += delta;
@@ -105,11 +119,6 @@ export function DistanceView({ code, myPlayerId, roundIndex }: Props) {
         WALK. Just keep walking. GPS pings every few meters. The whole team
         contributes — even if you’re slow as hell.
       </div>
-      {permError && (
-        <div className="mt-4 text-accent-pink text-xs">
-          Location denied. Refresh and allow it, or your distance won’t count.
-        </div>
-      )}
     </div>
   );
 }

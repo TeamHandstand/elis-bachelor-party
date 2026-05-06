@@ -9,7 +9,11 @@ export type ChallengeId =
   | "spin"
   | "north"
   | "time-guess"
-  | "trivia";
+  | "trivia"
+  // Not really a challenge — a "punishment line" the host drops between
+  // rounds. When live, the team currently in last place gets called out on a
+  // fullscreen takeover with the punishment message; host marks complete.
+  | "punishment";
 
 export type EventStatus = "lobby" | "active" | "finished";
 
@@ -221,6 +225,9 @@ export interface RoundConfig {
   // Only populated for `challenge === "trivia"`. Inlined into the round so
   // duplicate trivia rounds in one event can each have their own questions.
   questions?: TriviaQuestion[];
+  // Only populated for `challenge === "punishment"`. The text shown on the
+  // fullscreen takeover when the punishment is live.
+  message?: string;
 }
 
 // A reusable trivia question set the host can save and apply to any trivia

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useToastyStore } from "@/lib/store";
 import { useTeammates } from "@/lib/store/selectors";
 import { usePublisher } from "@/lib/store/bootstrap";
+import { PermissionGate } from "@/components/permissions/PermissionGate";
 
 interface Props {
   code: string;
@@ -13,68 +14,51 @@ interface Props {
 
 const TICK_COUNT = 72;
 
-// Read the device's compass heading (degrees clockwise from north).
-// iOS provides webkitCompassHeading (already true heading); Android exposes
-// alpha (degrees, but rotation around z-axis from device coord — used as
-// approximate heading). This is intentionally a thin inline helper because
-// there's no Compass sensor module yet.
-async function readHeading(): Promise<number | null> {
-  if (typeof window === "undefined") return null;
+async function requestOrientationPerm(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
   const OE: any = (window as any).DeviceOrientationEvent;
   if (OE && typeof OE.requestPermission === "function") {
     try {
-      const res = await OE.requestPermission();
-      if (res !== "granted") return null;
+      return (await OE.requestPermission()) === "granted";
     } catch {
-      return null;
+      return false;
     }
   }
-  return new Promise<number | null>((resolve) => {
-    let done = false;
-    const handler = (e: DeviceOrientationEvent) => {
-      if (done) return;
-      const ev: any = e;
-      let heading: number | null = null;
-      if (typeof ev.webkitCompassHeading === "number") {
-        heading = ev.webkitCompassHeading;
-      } else if (typeof e.alpha === "number") {
-        // Android: alpha is rotation around z; convert to compass heading.
-        heading = (360 - e.alpha) % 360;
-      }
-      if (heading === null || Number.isNaN(heading)) return;
-      done = true;
-      window.removeEventListener("deviceorientation", handler);
-      resolve(heading);
-    };
-    window.addEventListener("deviceorientation", handler);
-    setTimeout(() => {
-      if (!done) {
-        done = true;
-        window.removeEventListener("deviceorientation", handler);
-        resolve(null);
-      }
-    }, 3000);
-  });
+  return true;
 }
 
 function angularError(heading: number): number {
-  // Distance from 0° (north), in degrees, smallest absolute.
   let d = ((heading % 360) + 360) % 360;
   if (d > 180) d = 360 - d;
   return Math.abs(d);
 }
 
-export function NorthView({ code, myPlayerId, roundIndex }: Props) {
+export function NorthView(props: Props) {
+  return (
+    <PermissionGate
+      icon="🧭"
+      label="COMPASS"
+      blurb="We need your phone's compass to find true north. Hit ENABLE and say YES on the popup."
+      request={requestOrientationPerm}
+      iosSetting="Motion & Orientation Access"
+    >
+      <NorthChallenge {...props} />
+    </PermissionGate>
+  );
+}
+
+function NorthChallenge({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
   const teammates = useTeammates();
 
   const [liveHeading, setLiveHeading] = useState<number | null>(null);
-  const [permError, setPermError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submittedLocally, setSubmittedLocally] = useState(false);
-  const liveListenerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(null);
+  const liveListenerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(
+    null,
+  );
 
   const guesses = myProgress?.[roundIndex]?.guesses ?? [];
   const myGuess = guesses.find((g) => g.playerId === myPlayerId);
@@ -83,43 +67,25 @@ export function NorthView({ code, myPlayerId, roundIndex }: Props) {
     teammates.length > 0 &&
     teammates.every((p) => guesses.some((g) => g.playerId === p.id));
 
-  // Live compass display
+  // Live compass listener. The PermissionGate has already secured permission,
+  // so we just attach the listener directly.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    let cancelled = false;
-    (async () => {
-      const OE: any = (window as any).DeviceOrientationEvent;
-      if (OE && typeof OE.requestPermission === "function") {
-        try {
-          const r = await OE.requestPermission();
-          if (r !== "granted") {
-            if (!cancelled) setPermError(true);
-            return;
-          }
-        } catch {
-          if (!cancelled) setPermError(true);
-          return;
-        }
+    const handler = (e: DeviceOrientationEvent) => {
+      const ev: any = e;
+      let heading: number | null = null;
+      if (typeof ev.webkitCompassHeading === "number") {
+        heading = ev.webkitCompassHeading;
+      } else if (typeof e.alpha === "number") {
+        heading = (360 - e.alpha) % 360;
       }
-      if (cancelled) return;
-      const handler = (e: DeviceOrientationEvent) => {
-        const ev: any = e;
-        let heading: number | null = null;
-        if (typeof ev.webkitCompassHeading === "number") {
-          heading = ev.webkitCompassHeading;
-        } else if (typeof e.alpha === "number") {
-          heading = (360 - e.alpha) % 360;
-        }
-        if (heading !== null && !Number.isNaN(heading)) {
-          setLiveHeading(heading);
-        }
-      };
-      liveListenerRef.current = handler;
-      window.addEventListener("deviceorientation", handler);
-    })();
-
+      if (heading !== null && !Number.isNaN(heading)) {
+        setLiveHeading(heading);
+      }
+    };
+    liveListenerRef.current = handler;
+    window.addEventListener("deviceorientation", handler);
     return () => {
-      cancelled = true;
       if (liveListenerRef.current) {
         window.removeEventListener("deviceorientation", liveListenerRef.current);
         liveListenerRef.current = null;
@@ -128,18 +94,9 @@ export function NorthView({ code, myPlayerId, roundIndex }: Props) {
   }, []);
 
   async function submitGuess() {
-    if (!myTeamId || iGuessed || submitting) return;
+    if (!myTeamId || iGuessed || submitting || liveHeading === null) return;
     setSubmitting(true);
-    let heading = liveHeading;
-    if (heading === null) {
-      heading = await readHeading();
-    }
-    if (heading === null) {
-      setPermError(true);
-      setSubmitting(false);
-      return;
-    }
-    const err = angularError(heading);
+    const err = angularError(liveHeading);
     setSubmittedLocally(true);
     publisher({
       kind: "guess",
@@ -166,7 +123,6 @@ export function NorthView({ code, myPlayerId, roundIndex }: Props) {
 
       <div className="relative w-64 h-64 my-2">
         <div className="absolute inset-0 rounded-full bg-bg-card border-2 border-accent-orange/30" />
-        {/* Rotating tick ring — uniform marks only, no cardinal letters */}
         <svg
           viewBox="0 0 100 100"
           className="absolute inset-0 transition-transform duration-100"
@@ -174,7 +130,6 @@ export function NorthView({ code, myPlayerId, roundIndex }: Props) {
         >
           {Array.from({ length: TICK_COUNT }).map((_, i) => {
             const angle = (i * 360) / TICK_COUNT;
-            // 0° at top → use angle - 90 in radians
             const a = (angle - 90) * (Math.PI / 180);
             const r1 = 47;
             const r2 = 41;
@@ -199,7 +154,6 @@ export function NorthView({ code, myPlayerId, roundIndex }: Props) {
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-4xl">🧭</div>
         </div>
-        {/* Phone-pointer indicator (always points up - represents the phone's top edge) */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1 h-7 bg-accent-orange rounded-b" />
       </div>
 
@@ -214,7 +168,11 @@ export function NorthView({ code, myPlayerId, roundIndex }: Props) {
           disabled={submitting || liveHeading === null}
           className="mt-6 px-10 py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
         >
-          {submitting ? "..." : "LOCK IN"}
+          {submitting
+            ? "..."
+            : liveHeading === null
+              ? "WAITING FOR COMPASS…"
+              : "LOCK IN"}
         </button>
       ) : !allGuessed ? (
         <div className="mt-6 px-5 py-4 rounded-2xl bg-bg-card w-full max-w-xs">
@@ -268,18 +226,14 @@ export function NorthView({ code, myPlayerId, roundIndex }: Props) {
                       {isMe ? "you" : row.player.name}
                     </span>
                     <span className="font-display font-extrabold tabular-nums">
-                      {row.errorDeg !== null ? `${row.errorDeg.toFixed(0)}°` : "--"}
+                      {row.errorDeg !== null
+                        ? `${row.errorDeg.toFixed(0)}°`
+                        : "--"}
                     </span>
                   </div>
                 );
               })}
           </div>
-        </div>
-      )}
-
-      {permError && (
-        <div className="mt-4 text-accent-pink text-xs">
-          Compass denied or unavailable. iOS — refresh and accept.
         </div>
       )}
     </div>

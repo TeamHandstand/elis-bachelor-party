@@ -205,6 +205,9 @@ export function computeEventStandings(
   for (let idx = 0; idx < roundWinners.length; idx++) {
     const round = rounds[idx];
     if (!round) continue;
+    // Punishment rounds are non-scoring — they get a winner entry to mark
+    // them decided, but contribute zero points and don't affect rank.
+    if (round.challenge === "punishment") continue;
     const winnerTeamId = roundWinners[idx]?.teamId ?? null;
     const inputs = buildRankInputs(teams, progressByTeam, idx);
     const ranked = rankRound(round.challenge, inputs, winnerTeamId);
