@@ -2,6 +2,7 @@
 
 import { CHALLENGES } from "@/lib/challenges";
 import type { ChallengeId, Team } from "@/lib/types";
+import { formatPoints, rankRound, type RankInput } from "@/lib/scoring";
 
 export interface BreakdownEntry {
   team: Team;
@@ -34,41 +35,20 @@ function avgError(entry: BreakdownEntry): number {
   return g.reduce((s, x) => s + x.errorDeg, 0) / g.length;
 }
 
-function rankBadge(idx: number): string {
-  if (idx === 0) return "🥇";
-  if (idx === 1) return "🥈";
-  if (idx === 2) return "🥉";
-  return `#${idx + 1}`;
+function rankBadge(rank: number): string {
+  if (rank === 1) return "🥇";
+  if (rank === 2) return "🥈";
+  if (rank === 3) return "🥉";
+  return `#${rank}`;
 }
 
-function sortEntries(entries: BreakdownEntry[], challenge: ChallengeId): BreakdownEntry[] {
-  if (challenge === "north" || challenge === "time-guess") {
-    return [...entries].sort((a, b) => {
-      const ag = a.guesses?.length ?? 0;
-      const bg = b.guesses?.length ?? 0;
-      if ((ag > 0) !== (bg > 0)) return ag > 0 ? -1 : 1;
-      if (ag === 0 && bg === 0) return 0;
-      return avgError(a) - avgError(b);
-    });
-  }
-  if (challenge === "trivia") {
-    return [...entries].sort((a, b) => {
-      const aDone = a.completedAt !== null;
-      const bDone = b.completedAt !== null;
-      if (aDone !== bDone) return aDone ? -1 : 1;
-      if (a.value !== b.value) return b.value - a.value;
-      return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
-    });
-  }
-  return [...entries].sort((a, b) => {
-    const aDone = a.completedAt !== null;
-    const bDone = b.completedAt !== null;
-    if (aDone !== bDone) return aDone ? -1 : 1;
-    if (aDone && bDone) {
-      return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
-    }
-    return b.value - a.value;
-  });
+function toRankInput(entry: BreakdownEntry): RankInput {
+  return {
+    team: entry.team,
+    value: entry.value,
+    completedAt: entry.completedAt,
+    guesses: entry.guesses ?? [],
+  };
 }
 
 function score(
@@ -107,17 +87,20 @@ export function RoundBreakdown({
   winnerTeamId,
   entries,
 }: Props) {
-  const sorted = sortEntries(entries, challenge);
-  if (sorted.length === 0) {
+  if (entries.length === 0) {
     return (
       <div className="text-xs opacity-60 italic py-1">
         no data captured for this round
       </div>
     );
   }
+  const ranked = rankRound(challenge, entries.map(toRankInput), winnerTeamId);
+  const entryById = new Map(entries.map((e) => [e.team.id, e] as const));
   return (
     <div className="space-y-1.5">
-      {sorted.map((entry, idx) => {
+      {ranked.map((row) => {
+        const entry = entryById.get(row.team.id);
+        if (!entry) return null;
         const isMine = entry.team.id === myTeamId;
         const isWinner = entry.team.id === winnerTeamId;
         return (
@@ -130,7 +113,7 @@ export function RoundBreakdown({
             }`}
           >
             <span className="font-display font-extrabold text-sm w-7 text-center opacity-80">
-              {rankBadge(idx)}
+              {rankBadge(row.rank)}
             </span>
             <span className="text-base">{entry.team.emoji}</span>
             <span className={`flex-1 truncate ${isMine ? "font-extrabold" : ""}`}>
@@ -139,6 +122,9 @@ export function RoundBreakdown({
             </span>
             <span className="font-display font-extrabold tabular-nums text-sm">
               {score(entry, challenge, threshold, roundStartedAt)}
+            </span>
+            <span className="text-[10px] uppercase tracking-widest font-extrabold tabular-nums opacity-80 min-w-[2.5rem] text-right">
+              +{formatPoints(row.points)}pt
             </span>
             {isWinner && (
               <span className="text-[10px] uppercase tracking-widest font-extrabold opacity-80">

@@ -8,6 +8,8 @@ import { useToastyStore } from "@/lib/store";
 import { useRoundStandings } from "@/lib/store/selectors";
 import { CHALLENGES } from "@/lib/challenges";
 import { normalizeEventCode } from "@/lib/utils/code";
+import { formatPoints } from "@/lib/scoring";
+import { ScoringExplainer } from "@/components/play/ScoringExplainer";
 
 export default function DonePage() {
   const params = useParams<{ code: string }>();
@@ -51,8 +53,11 @@ export default function DonePage() {
       </div>
 
       <div className="rounded-2xl bg-bg-card p-4 mb-4">
-        <div className="text-[10px] uppercase tracking-widest opacity-60 mb-2 font-bold">
-          final standings
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] uppercase tracking-widest opacity-60 font-bold">
+            final standings
+          </div>
+          <ScoringExplainer teamCount={standings.length} />
         </div>
         {standings.map((row, i) => {
           const medals = ["🥇", "🥈", "🥉"];
@@ -68,8 +73,14 @@ export default function DonePage() {
                 {medals[i] ?? "·"} {row.team.emoji} {row.team.name}
                 {isMine ? " (us)" : ""}
               </span>
-              <span className="tabular-nums font-bold">
-                {row.wins} {row.wins === 1 ? "win" : "wins"}
+              <span className="tabular-nums font-bold flex items-baseline gap-2">
+                <span>
+                  {formatPoints(row.points)}{" "}
+                  {row.points === 1 ? "pt" : "pts"}
+                </span>
+                <span className="text-[10px] opacity-60 font-normal">
+                  {row.wins} {row.wins === 1 ? "win" : "wins"}
+                </span>
               </span>
             </div>
           );

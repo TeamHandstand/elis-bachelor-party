@@ -2,6 +2,11 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import type { ResultsResponse } from "@/lib/api/contract";
 import { CHALLENGES } from "@/lib/challenges";
+import {
+  computeEventStandings,
+  formatPoints,
+} from "@/lib/scoring";
+import type { TeamProgress } from "@/lib/types";
 
 async function fetchResults(code: string): Promise<ResultsResponse | null> {
   const h = await headers();
@@ -56,29 +61,32 @@ export default async function ResultsPage({ params }: PageProps) {
     matrix[row.teamId][row.roundIndex] = row;
   }
 
-  // Round-wins-based ranking (heptathlon model).
+  // Olympic-style point ranking — points awarded each round by finish
+  // position. Build a per-team progress map from finalProgress so the
+  // shared scoring utility can run server-side.
   const winnersByRound = event.roundWinners ?? [];
-  const winsByTeam = new Map<string, number[]>();
-  winnersByRound.forEach((w, idx) => {
-    const arr = winsByTeam.get(w.teamId) ?? [];
-    arr.push(idx);
-    winsByTeam.set(w.teamId, arr);
-  });
-
-  const ranked = teams
-    .map((team) => ({
-      team,
-      wins: winsByTeam.get(team.id) ?? [],
-      tm: matrix[team.id] ?? {},
-    }))
-    .sort((a, b) => {
-      if (b.wins.length !== a.wins.length)
-        return b.wins.length - a.wins.length;
-      return a.team.name.localeCompare(b.team.name);
-    });
+  const progressByTeam: Record<string, TeamProgress> = {};
+  for (const row of finalProgress) {
+    progressByTeam[row.teamId] ??= {};
+    progressByTeam[row.teamId][row.roundIndex] = {
+      value: row.value,
+      completed: row.completed,
+      completedAt: row.completedAt
+        ? new Date(row.completedAt).getTime()
+        : null,
+    };
+  }
+  const standings = computeEventStandings(
+    teams,
+    rounds,
+    winnersByRound,
+    progressByTeam,
+  );
 
   const winner =
-    teams.find((t) => t.id === event.winnerTeamId) ?? ranked[0]?.team ?? null;
+    teams.find((t) => t.id === event.winnerTeamId) ??
+    standings[0]?.team ??
+    null;
 
   return (
     <main className="min-h-screen p-6">
@@ -111,11 +119,22 @@ export default async function ResultsPage({ params }: PageProps) {
         </div>
 
         <section className="bg-bg-card rounded-xl2 p-4">
-          <h2 className="font-display text-xl font-bold mb-3">
-            🏁 Final standings
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-display text-xl font-bold">
+              🏁 Final standings
+            </h2>
+            <details className="text-xs opacity-70 cursor-pointer">
+              <summary>How scoring works</summary>
+              <div className="mt-2 max-w-sm bg-bg-deep/60 rounded-lg p-3">
+                Each round, every team earns points based on finish position:{" "}
+                <b>{teams.length}</b> pts for 1st, {teams.length - 1} for 2nd,
+                … 1 pt for last. Tied teams share their tied positions evenly.
+                Most total points wins; round wins is the tiebreaker.
+              </div>
+            </details>
+          </div>
           <ol className="space-y-2">
-            {ranked.map((r, idx) => {
+            {standings.map((r, idx) => {
               const teamPlayers = players.filter((p) => p.teamId === r.team.id);
               return (
                 <li
@@ -146,9 +165,12 @@ export default async function ResultsPage({ params }: PageProps) {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs opacity-70">round wins</div>
-                    <div className="font-display text-2xl font-extrabold">
-                      {r.wins.length}
+                    <div className="text-xs opacity-70">points</div>
+                    <div className="font-display text-2xl font-extrabold tabular-nums">
+                      {formatPoints(r.points)}
+                    </div>
+                    <div className="text-[10px] opacity-60 tabular-nums">
+                      {r.wins} {r.wins === 1 ? "win" : "wins"}
                     </div>
                   </div>
                 </li>

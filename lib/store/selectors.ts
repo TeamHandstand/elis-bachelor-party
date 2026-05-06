@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import { useToastyStore } from "./index";
 import type { Player, Team } from "@/lib/types";
+import { computeEventStandings, type EventStanding } from "@/lib/scoring";
 
 /**
  * Memoized standings: ordered list of teams by completed-round count, with
@@ -76,41 +77,29 @@ export function useStablePublisher(code: string): (msg: ProgressMsg) => Promise<
   }, [code]);
 }
 
-export interface RoundStanding {
-  team: Team;
-  wins: number;
-  // Round indices where this team won (for tooltip / breakdown UIs).
-  wonRounds: number[];
-}
+export type RoundStanding = EventStanding;
 
 /**
- * Standings ordered by round wins (descending). Teams with zero wins still
- * appear, sorted alphabetically as a stable secondary key. Use for the
- * heptathlon scoreboard.
+ * Olympic-style standings: every team earns points each decided round based
+ * on where it finished — N points for 1st, N-1 for 2nd, …, 1 for last.
+ * Ties share the average of their tied positions' points; the host-decided
+ * round winner is pinned to rank 1. Sorted by total points desc, then wins,
+ * then team name as a stable tiebreaker.
  */
 export function useRoundStandings(): RoundStanding[] {
   const teams = useToastyStore((s) => s.teams);
+  const progress = useToastyStore((s) => s.progress);
   const event = useToastyStore((s) => s.event);
 
   return useMemo(() => {
-    const winnerEntries = event?.roundWinners ?? [];
-    const winsByTeam = new Map<string, number[]>();
-    winnerEntries.forEach((w, idx) => {
-      const arr = winsByTeam.get(w.teamId) ?? [];
-      arr.push(idx);
-      winsByTeam.set(w.teamId, arr);
-    });
-    return Object.values(teams)
-      .map((team) => ({
-        team,
-        wins: (winsByTeam.get(team.id) ?? []).length,
-        wonRounds: winsByTeam.get(team.id) ?? [],
-      }))
-      .sort((a, b) => {
-        if (b.wins !== a.wins) return b.wins - a.wins;
-        return a.team.name.localeCompare(b.team.name);
-      });
-  }, [teams, event]);
+    if (!event) return [];
+    return computeEventStandings(
+      Object.values(teams),
+      event.rounds,
+      event.roundWinners ?? [],
+      progress,
+    );
+  }, [teams, progress, event]);
 }
 
 /**
