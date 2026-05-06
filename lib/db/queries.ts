@@ -376,6 +376,34 @@ export async function getPlayerByIdAndEvent(input: {
   return rows[0] ? playerRowToPlayer(rows[0]) : null;
 }
 
+/**
+ * Permanently delete a player from an event. The events.host_player_id FK
+ * uses ON DELETE SET NULL so the host slot clears automatically if the
+ * deleted player was hosting. final_progress is keyed by team, not player,
+ * so team-level scores survive the removal.
+ */
+export async function deletePlayer(input: {
+  code: string;
+  playerId: string;
+}): Promise<{ ok: true } | { error: "not-found" | "player-not-in-event" }> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  const result = await db
+    .delete(players)
+    .where(
+      and(eq(players.id, input.playerId), eq(players.eventId, eventRow.id)),
+    )
+    .returning({ id: players.id });
+  if (result.length === 0) return { error: "player-not-in-event" };
+  return { ok: true };
+}
+
 export async function renameTeam(input: {
   code: string;
   teamId: string;

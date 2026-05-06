@@ -17,6 +17,7 @@ import {
   addPlayer,
   assignPlayer,
   createTeam as createTeamFetch,
+  deletePlayer as deletePlayerFetch,
   deleteTeam as deleteTeamFetch,
   patchEvent,
 } from "./_fetch";
@@ -135,6 +136,40 @@ export default function TeamBuilder({ event, teams, players, onChange }: Props) 
     }
   }
 
+  async function removePlayer(playerId: string) {
+    const player = players.find((p) => p.id === playerId);
+    if (!player) return;
+    const isHostPlayer = event.hostPlayerId === playerId;
+    const lines = [
+      `Delete ${player.name} from the game?`,
+      "",
+      "They'll be removed entirely. If they rejoin from the same device they'll come in as a new player.",
+    ];
+    if (isHostPlayer) {
+      lines.push("");
+      lines.push("⚠ This player is the host — the host slot will clear.");
+    }
+    if (typeof window !== "undefined" && !window.confirm(lines.join("\n"))) {
+      return;
+    }
+
+    // Optimistic: drop the player and clear the host slot if it was them.
+    const optimisticPlayers = players.filter((p) => p.id !== playerId);
+    const optimisticEvent = isHostPlayer
+      ? { ...event, hostPlayerId: null }
+      : undefined;
+    onChange({
+      players: optimisticPlayers,
+      ...(optimisticEvent ? { event: optimisticEvent } : {}),
+    });
+    try {
+      await deletePlayerFetch(event.code, playerId);
+    } catch {
+      // Roll back on failure.
+      onChange({ players, event });
+    }
+  }
+
   async function removeTeam(teamId: string) {
     const team = teams.find((t) => t.id === teamId);
     if (!team) return;
@@ -237,7 +272,10 @@ export default function TeamBuilder({ event, teams, players, onChange }: Props) 
           ) : null}
         </form>
 
-        <NamePool players={grouped.pool} />
+        <NamePool
+          players={grouped.pool}
+          onDeletePlayer={removePlayer}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {teams.map((team, idx) => (
@@ -249,6 +287,7 @@ export default function TeamBuilder({ event, teams, players, onChange }: Props) 
               onRename={(name) => updateTeam(team.id, { name })}
               onEmoji={(emoji) => updateTeam(team.id, { emoji })}
               onDelete={() => removeTeam(team.id)}
+              onDeletePlayer={removePlayer}
             />
           ))}
           <NewTeamSlot
@@ -314,7 +353,13 @@ function NewTeamSlot({
   );
 }
 
-function NamePool({ players }: { players: Player[] }) {
+function NamePool({
+  players,
+  onDeletePlayer,
+}: {
+  players: Player[];
+  onDeletePlayer: (playerId: string) => void;
+}) {
   const { isOver, setNodeRef } = useDroppable({ id: POOL_ID });
   return (
     <div
@@ -336,7 +381,11 @@ function NamePool({ players }: { players: Player[] }) {
       ) : (
         <div className="flex flex-wrap gap-2">
           {players.map((p) => (
-            <DraggablePlayer key={p.id} player={p} />
+            <DraggablePlayer
+              key={p.id}
+              player={p}
+              onDelete={() => onDeletePlayer(p.id)}
+            />
           ))}
         </div>
       )}
@@ -351,6 +400,7 @@ function TeamBox({
   onRename,
   onEmoji,
   onDelete,
+  onDeletePlayer,
 }: {
   team: Team;
   players: Player[];
@@ -358,6 +408,7 @@ function TeamBox({
   onRename: (name: string) => void;
   onEmoji: (emoji: string) => void;
   onDelete: () => void;
+  onDeletePlayer: (playerId: string) => void;
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: team.id });
   const [picking, setPicking] = useState(false);
@@ -437,7 +488,12 @@ function TeamBox({
       </div>
       <div className="flex flex-wrap gap-2 min-h-[40px]">
         {players.map((p) => (
-          <DraggablePlayer key={p.id} player={p} onTeam />
+          <DraggablePlayer
+            key={p.id}
+            player={p}
+            onTeam
+            onDelete={() => onDeletePlayer(p.id)}
+          />
         ))}
         {players.length === 0 ? (
           <div className="text-xs opacity-70 italic py-2">Drop a name here</div>
@@ -447,24 +503,54 @@ function TeamBox({
   );
 }
 
-function DraggablePlayer({ player, onTeam }: { player: Player; onTeam?: boolean }) {
+function DraggablePlayer({
+  player,
+  onTeam,
+  onDelete,
+}: {
+  player: Player;
+  onTeam?: boolean;
+  onDelete?: () => void;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: player.id,
   });
   return (
-    <button
+    <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      type="button"
-      className={`no-select touch-none px-3 py-2 rounded-xl text-sm font-bold border transition-opacity ${
+      className={`relative inline-flex items-stretch rounded-xl border transition-opacity ${
         onTeam
           ? "bg-black/30 border-white/30 text-white"
           : "bg-bg-deep border-white/10 text-white"
       } ${isDragging ? "opacity-30" : "opacity-100"}`}
     >
-      {player.name}
-    </button>
+      <button
+        {...listeners}
+        {...attributes}
+        type="button"
+        className="no-select touch-none px-3 py-2 text-sm font-bold rounded-l-xl"
+      >
+        {player.name}
+      </button>
+      {onDelete ? (
+        <button
+          type="button"
+          aria-label={`Delete ${player.name}`}
+          // Stop drag listeners from claiming this tap, then delete.
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="px-2 text-[11px] font-extrabold leading-none rounded-r-xl border-l border-white/20 hover:bg-accent-pink/80 active:bg-accent-pink"
+          title={`Delete ${player.name}`}
+        >
+          ✕
+        </button>
+      ) : null}
+    </div>
   );
 }
 
