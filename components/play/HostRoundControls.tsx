@@ -54,10 +54,14 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
     }
   }
 
-  // Sort entries: north uses smallest-avg-error, others use earliest completion.
+  // Sort entries: north + time-guess use smallest-avg-error, others use
+  // earliest completion.
   const sortedEntries = useMemo(() => {
     if (variant.kind !== "end") return [] as EndPickerEntry[];
-    if (variant.challenge === "north") {
+    if (
+      variant.challenge === "north" ||
+      variant.challenge === "time-guess"
+    ) {
       return [...variant.entries].sort((a, b) => {
         const ag = a.guesses?.length ?? 0;
         const bg = b.guesses?.length ?? 0;
@@ -133,7 +137,7 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
       } else if (
         pending.kind === "server" &&
         variant.kind === "end" &&
-        variant.challenge === "north" &&
+        (variant.challenge === "north" || variant.challenge === "time-guess") &&
         sortedEntries[0]?.guesses?.length
       ) {
         // Server can't compute avg-error (no guess data persisted server-side).
@@ -145,7 +149,7 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
       setPicking(false);
     }
 
-    const isNorthVariant = variant.challenge === "north";
+    const isNorthVariant = (variant.challenge === "north" || variant.challenge === "time-guess");
     const pendingLabel =
       pending?.kind === "team"
         ? pending.label
@@ -165,7 +169,7 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
         <div className="flex flex-col gap-2">
           {sortedEntries.map((e, idx) => {
             const isDone = e.completedAt !== null;
-            const isNorth = variant.challenge === "north";
+            const isNorth = (variant.challenge === "north" || variant.challenge === "time-guess");
             const guessCount = e.guesses?.length ?? 0;
             const avgErr =
               isNorth && guessCount > 0
@@ -173,13 +177,17 @@ export function HostRoundControls({ variant, onStart, onEnd, onRedo }: Props) {
                   guessCount
                 : null;
             const isFirst = idx === 0 && (isNorth ? guessCount > 0 : isDone);
-            const valueLabel = isNorth
-              ? guessCount === 0
+            const valueLabel = !isNorth
+              ? def.formatProgress(e.value, e.threshold)
+              : guessCount === 0
                 ? "no guesses"
-                : `${avgErr!.toFixed(0)}° avg · ${guessCount} guess${
-                    guessCount === 1 ? "" : "es"
-                  }`
-              : def.formatProgress(e.value, e.threshold);
+                : variant.challenge === "time-guess"
+                  ? `±${(avgErr! / 1000).toFixed(2)}s avg · ${guessCount} guess${
+                      guessCount === 1 ? "" : "es"
+                    }`
+                  : `${avgErr!.toFixed(0)}° avg · ${guessCount} guess${
+                      guessCount === 1 ? "" : "es"
+                    }`;
             const isSelected =
               pending?.kind === "team" && pending.teamId === e.team.id;
             return (

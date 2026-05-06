@@ -15,6 +15,7 @@ import {
 import { useStandings } from "@/lib/store/selectors";
 import type { ChallengeId } from "@/lib/types";
 import { CountdownOverlay } from "@/components/play/CountdownOverlay";
+import { FinaleLock } from "@/components/play/FinaleLock";
 import { RoundResults, type ResultEntry } from "@/components/play/RoundResults";
 import {
   HostRoundControls,
@@ -29,6 +30,7 @@ import { ScreamView } from "@/components/challenge/ScreamView";
 import { ShakeView } from "@/components/challenge/ShakeView";
 import { SpinView } from "@/components/challenge/SpinView";
 import { NorthView } from "@/components/challenge/NorthView";
+import { TimeGuessView } from "@/components/challenge/TimeGuessView";
 
 const VALID_IDS: ChallengeId[] = [
   "distance",
@@ -38,6 +40,7 @@ const VALID_IDS: ChallengeId[] = [
   "shake",
   "spin",
   "north",
+  "time-guess",
 ];
 
 export default function ChallengePage() {
@@ -148,13 +151,16 @@ export default function ChallengePage() {
     if (!allDone) return;
     autoEndedRef.current = challenge;
 
-    // For north, smallest avg angular error wins. Server doesn't have the
-    // per-player guess data — pick the winner client-side and pass it along.
+    // For north + time-guess, smallest avg error wins. Server doesn't have
+    // the per-player guess data — pick the winner client-side and pass it
+    // along.
     let chosenTeamId: string | undefined;
-    if (challenge === "north") {
+    if (challenge === "north" || challenge === "time-guess") {
       let best: { teamId: string; avg: number } | null = null;
       for (const t of allTeamsList) {
-        const guesses = progressMap[t.id]?.north?.guesses ?? [];
+        const guesses =
+          progressMap[t.id]?.[challenge as "north" | "time-guess"]
+            ?.guesses ?? [];
         if (guesses.length === 0) continue;
         const avg =
           guesses.reduce((s, g) => s + g.errorDeg, 0) / guesses.length;
@@ -248,6 +254,9 @@ export default function ChallengePage() {
     case "north":
       view = <NorthView code={code} myPlayerId={myPlayerId} />;
       break;
+    case "time-guess":
+      view = <TimeGuessView code={code} myPlayerId={myPlayerId} />;
+      break;
   }
 
   const progressLabel = myCur
@@ -312,6 +321,16 @@ export default function ChallengePage() {
     }
   }
 
+  // Pre-release lock: every round decided, host hasn't released yet.
+  const totalEnabledRounds = event
+    ? enabledChallengeOrder(event.challenges).length
+    : 0;
+  const pendingRelease =
+    !!event &&
+    totalEnabledRounds > 0 &&
+    event.roundWinners.length >= totalEnabledRounds &&
+    event.status === "active";
+
   return (
     <>
       {showCountdown && event.currentRoundStartsAt !== null && (
@@ -322,6 +341,10 @@ export default function ChallengePage() {
             /* fall through to challenge view */
           }}
         />
+      )}
+
+      {pendingRelease && !isHost && (
+        <FinaleLock groomName={event?.groomName} />
       )}
       <main className="min-h-screen flex flex-col">
         <header className="flex items-center gap-3 p-3 bg-bg-deep">

@@ -53,7 +53,7 @@ function northAvgError(entry: ResultEntry): number {
 }
 
 function sortEntries(entries: ResultEntry[], challenge: ChallengeId): ResultEntry[] {
-  if (challenge === "north") {
+  if (challenge === "north" || challenge === "time-guess") {
     return [...entries].sort((a, b) => {
       const ag = a.guesses?.length ?? 0;
       const bg = b.guesses?.length ?? 0;
@@ -194,6 +194,13 @@ function primaryLabel(
       guesses.length === 1 ? "guess" : "guesses"
     }`;
   }
+  if (challenge === "time-guess") {
+    const guesses = entry.guesses ?? [];
+    if (guesses.length === 0) return "no guesses";
+    return `±${(northAvgError(entry) / 1000).toFixed(2)}s avg · ${guesses.length} ${
+      guesses.length === 1 ? "guess" : "guesses"
+    }`;
+  }
   if (entry.completedAt !== null) {
     const ms = timeTaken(entry, roundStartedAt);
     return `finished in ${formatTime(ms)}`;
@@ -219,6 +226,49 @@ function MyTeamCard({
   code?: string;
 }) {
   const def = CHALLENGES[challenge];
+
+  if (challenge === "time-guess") {
+    const guesses = entry.guesses ?? [];
+    const avgMs = northAvgError(entry); // ms deviation
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 p-6 bg-gradient-done text-white text-center">
+        <div className="text-xs uppercase tracking-[0.3em] opacity-90 mb-2">
+          your team finished
+        </div>
+        <div className="text-6xl mb-2">⏱</div>
+        <div className="font-display text-7xl font-extrabold tabular-nums leading-none">
+          ±{(avgMs / 1000).toFixed(2)}s
+        </div>
+        <div className="text-xs uppercase tracking-widest opacity-90 mt-2">
+          avg deviation
+        </div>
+        <div className="mt-6 w-full max-w-xs space-y-1">
+          {guesses.map((g) => (
+            <div
+              key={g.playerId}
+              className="flex justify-between text-sm tabular-nums bg-black/20 rounded-lg px-3 py-1.5"
+            >
+              <span>{players[g.playerId]?.name ?? "?"}</span>
+              <span className="font-bold">
+                ±{(g.errorDeg / 1000).toFixed(2)}s
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6 text-[11px] opacity-90 max-w-xs">
+          wait for host to end the round and crown the winner.
+        </div>
+        {code ? (
+          <Link
+            href={`/e/${code}/play`}
+            className="mt-6 px-6 py-3 rounded-2xl bg-black/30 text-white font-bold tracking-widest text-xs uppercase border border-white/30"
+          >
+            ← back to rounds
+          </Link>
+        ) : null}
+      </div>
+    );
+  }
 
   if (challenge === "north") {
     const guesses = entry.guesses ?? [];
@@ -332,6 +382,18 @@ function TeamResultRow({
       secondary = "—";
     } else {
       primary = `${northAvgError(entry).toFixed(0)}° avg`;
+      secondary = `${guesses.length} ${
+        guesses.length === 1 ? "guess" : "guesses"
+      } in`;
+    }
+  } else if (challenge === "time-guess") {
+    const guesses = entry.guesses ?? [];
+    if (guesses.length === 0) {
+      primary = "no guesses";
+      secondary = "—";
+    } else {
+      const avgMs = northAvgError(entry);
+      primary = `±${(avgMs / 1000).toFixed(2)}s avg`;
       secondary = `${guesses.length} ${
         guesses.length === 1 ? "guess" : "guesses"
       } in`;

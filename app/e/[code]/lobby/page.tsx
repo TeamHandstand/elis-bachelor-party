@@ -37,11 +37,14 @@ export default function LobbyPage() {
 
   const me = myPlayerId ? players[myPlayerId] : null;
 
-  // Host detection: either designated host-player OR has the host cookie.
+  // Host detection: designated host-player. The host-cookie fallback only
+  // counts when nobody has been crowned — otherwise stale browser cookies
+  // (Sam logging in once as host on a phone, then handing it to a player)
+  // would leak host buttons to the wrong person.
   const isHostPlayer =
     !!myPlayerId && event?.hostPlayerId === myPlayerId;
   const { isHost: isCookieHost } = useCookieHost();
-  const isHost = isHostPlayer || isCookieHost;
+  const isHost = isHostPlayer || (!event?.hostPlayerId && isCookieHost);
 
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -158,8 +161,8 @@ export default function LobbyPage() {
         </div>
       )}
 
-      {/* Cookie-hosts (only) get an "events list" back link. */}
-      {isCookieHost && (
+      {/* Hosts (only) get an "events list" back link. */}
+      {isHost && (
         <Link
           href="/host"
           className="self-center text-xs opacity-60 underline mb-4"

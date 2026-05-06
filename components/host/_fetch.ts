@@ -149,6 +149,16 @@ export async function endRound(
   });
 }
 
+export async function resetRound(
+  code: string,
+  body: { playerId?: string; roundIndex: number },
+): Promise<{ event: import("@/lib/types").EventConfig }> {
+  return http(`/api/events/${code}/round/reset`, {
+    method: "POST",
+    body,
+  });
+}
+
 import type {
   EndEventRequest,
   EndEventResponse,

@@ -12,6 +12,8 @@ import {
   type FinalProgressRow,
 } from "./schema";
 import {
+  CHALLENGE_ORDER,
+  CHALLENGES,
   defaultChallengeConfig,
   enabledChallengeOrder,
 } from "@/lib/challenges";
@@ -49,13 +51,32 @@ const TEAM_PRESET_POOL: Array<{ name: string; emoji: string; color: string }> =
 // ----- Row → DTO mappers -----
 
 export function eventRowToConfig(row: EventRow): EventConfig {
+  // Backfill any new challenge ids that didn't exist when this event was
+  // created. Keeps old events working as we add new challenges (e.g.,
+  // 'time-guess' was added later).
+  const stored = (row.challenges ?? {}) as Partial<EventConfig["challenges"]>;
+  const merged: EventConfig["challenges"] = {} as EventConfig["challenges"];
+  let nextOrder = CHALLENGE_ORDER.length;
+  for (const id of CHALLENGE_ORDER) {
+    const cur = stored[id];
+    if (cur) {
+      merged[id] = cur;
+    } else {
+      merged[id] = {
+        enabled: false,
+        threshold: CHALLENGES[id].defaultThreshold,
+        order: nextOrder++,
+      };
+    }
+  }
+
   return {
     id: row.id,
     code: row.code,
     title: row.title,
     groomName: row.groomName,
     status: row.status as EventStatus,
-    challenges: row.challenges as EventConfig["challenges"],
+    challenges: merged,
     createdAt: row.createdAt.toISOString(),
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
@@ -762,6 +783,67 @@ export async function setHostPlayer(input: {
 const COUNTDOWN_MS = 5000;
 
 /**
+ * Wipe a specific round (and everything after it) without starting it.
+ * Trims roundWinners, deletes final_progress for that challenge and all
+ * later challenges, clears any live round state. Caller (host) then taps
+ * "START ROUND N" to actually begin the round again.
+ */
+export async function resetRound(input: {
+  code: string;
+  roundIndex: number;
+}): Promise<
+  | { event: EventConfig }
+  | { error: "not-found" | "invalid-index" }
+> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  const challengesCfg = eventRow.challenges as EventConfig["challenges"];
+  const order = enabledChallengeOrder(challengesCfg);
+  if (
+    input.roundIndex < 0 ||
+    input.roundIndex >= order.length
+  ) {
+    return { error: "invalid-index" };
+  }
+
+  const winners = (eventRow.roundWinners as RoundWinnerEntry[]) ?? [];
+  const trimmedWinners = winners.slice(0, input.roundIndex);
+  const challengesToWipe = order.slice(input.roundIndex);
+
+  if (challengesToWipe.length > 0) {
+    await db.execute(sql`
+      DELETE FROM final_progress
+      WHERE event_id = ${eventRow.id}
+      AND challenge = ANY(${challengesToWipe})
+    `);
+  }
+
+  const updated = await db
+    .update(events)
+    .set({
+      roundWinners: trimmedWinners,
+      currentRoundIndex: null,
+      currentRoundStatus: null,
+      currentRoundStartsAt: null,
+      // If the event had previously been finished (last round + released),
+      // un-finish it so the host can restart from the redone round.
+      status: "active",
+      finishedAt: null,
+      winnerTeamId: null,
+    })
+    .where(eq(events.id, eventRow.id))
+    .returning();
+  const newRow = updated[0] ?? eventRow;
+  return { event: eventRowToConfig(newRow) };
+}
+
+/**
  * Start the next undecided round, or redo a specific round.
  *
  * Advance path (no redo): if no round is currently live, picks the next round
@@ -986,59 +1068,15 @@ export async function endRound(input: {
 
   const isLastRound = idx + 1 >= order.length;
 
-  let overallWinnerTeamId: string | null = null;
-  if (isLastRound) {
-    const counts = new Map<string, number>();
-    for (const w of nextWinners) {
-      counts.set(w.teamId, (counts.get(w.teamId) ?? 0) + 1);
-    }
-    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-    if (
-      sorted.length === 1 ||
-      (sorted.length > 1 && sorted[0][1] > sorted[1][1])
-    ) {
-      overallWinnerTeamId = sorted[0][0];
-    } else {
-      // Tied. Prefer team that won north.
-      const tiedCount = sorted[0][1];
-      const tiedTeamIds = new Set(
-        sorted.filter(([, c]) => c === tiedCount).map(([t]) => t),
-      );
-      const northWinner = nextWinners.find(
-        (w) => w.challenge === "north" && tiedTeamIds.has(w.teamId),
-      );
-      if (northWinner) {
-        overallWinnerTeamId = northWinner.teamId;
-      } else {
-        // Fallback: earliest cumulative decidedAt.
-        const teamFirstWin = new Map<string, number>();
-        for (const w of nextWinners) {
-          if (!tiedTeamIds.has(w.teamId)) continue;
-          const cur = teamFirstWin.get(w.teamId);
-          if (cur === undefined || w.decidedAt < cur) {
-            teamFirstWin.set(w.teamId, w.decidedAt);
-          }
-        }
-        const earliest = [...teamFirstWin.entries()].sort(
-          (a, b) => a[1] - b[1],
-        );
-        overallWinnerTeamId = earliest[0]?.[0] ?? sorted[0][0];
-      }
-    }
-  }
-
+  // Note: previously the last round auto-finished the event. We now stay in
+  // 'active' status with all rounds decided, and rely on a host RELEASE
+  // (POST /api/events/:code/end) to flip status='finished'. Keeps players
+  // locked into the "waiting on host" screen until then.
   const claimed = await db
     .update(events)
     .set({
       currentRoundStatus: "decided",
       roundWinners: nextWinners,
-      ...(isLastRound
-        ? {
-            status: "finished",
-            finishedAt: new Date(),
-            winnerTeamId: overallWinnerTeamId,
-          }
-        : {}),
     })
     .where(
       and(
@@ -1074,7 +1112,9 @@ export async function endRound(input: {
     challenge,
     winnerTeamId,
     decidedAt,
-    eventFinished: isLastRound,
+    // The event is no longer auto-finished here. Whether all rounds are
+    // decided is a separate concern — the host explicitly releases.
+    eventFinished: false,
     alreadyDecided: false,
   };
 }

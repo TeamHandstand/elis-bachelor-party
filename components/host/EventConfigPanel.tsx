@@ -254,15 +254,34 @@ function SortableChallengeRow({
         </div>
       </label>
       <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min={1}
-          value={threshold}
-          onChange={(e) => onThreshold(Number(e.target.value) || 0)}
-          disabled={!enabled}
-          className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink disabled:opacity-40"
-        />
-        <span className="text-xs opacity-60 w-20">{def.unit}</span>
+        {id === "time-guess" ? (
+          <>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={Math.round(threshold / 1000)}
+              onChange={(e) =>
+                onThreshold((Number(e.target.value) || 0) * 1000)
+              }
+              disabled={!enabled}
+              className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink disabled:opacity-40"
+            />
+            <span className="text-xs opacity-60 w-20">seconds</span>
+          </>
+        ) : (
+          <>
+            <input
+              type="number"
+              min={1}
+              value={threshold}
+              onChange={(e) => onThreshold(Number(e.target.value) || 0)}
+              disabled={!enabled}
+              className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink disabled:opacity-40"
+            />
+            <span className="text-xs opacity-60 w-20">{def.unit}</span>
+          </>
+        )}
       </div>
     </div>
   );

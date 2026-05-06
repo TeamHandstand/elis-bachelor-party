@@ -165,7 +165,10 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
       case "guess": {
         const teamProg = state.progress[msg.teamId];
         if (!teamProg) return;
-        const cur = teamProg.north;
+        // Generic per-player-once: works for north (errorDeg) AND time-guess
+        // (errorDeg = ms deviation from target).
+        const ch = msg.challenge;
+        const cur = teamProg[ch];
         const guesses = [...(cur.guesses ?? [])];
         // dedupe per player — they only get one shot
         if (!guesses.some((g) => g.playerId === msg.playerId)) {
@@ -173,7 +176,7 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         }
         const updated = {
           ...teamProg,
-          north: {
+          [ch]: {
             ...cur,
             value: guesses.length,
             guesses,
@@ -214,6 +217,57 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
 
       case "progress-reset": {
         get().clearAllProgress();
+        break;
+      }
+
+      case "round-reset": {
+        const ev = state.event;
+        if (!ev) return;
+        // Wipe progress for the reset round and everything beyond, but
+        // preserve earlier rounds so per-round place medals stay correct.
+        const enabled = CHALLENGE_ORDER.filter(
+          (id) => ev.challenges[id]?.enabled,
+        );
+        const order: ChallengeId[] = [...enabled].sort((a, b) => {
+          const oa =
+            ev.challenges[a]?.order ?? CHALLENGE_ORDER.indexOf(a);
+          const ob =
+            ev.challenges[b]?.order ?? CHALLENGE_ORDER.indexOf(b);
+          return oa - ob;
+        });
+        const toWipe = order.slice(msg.fromIndex);
+        const newProgress: Record<string, TeamProgress> = {};
+        for (const tid of Object.keys(state.progress)) {
+          const tp = state.progress[tid];
+          const cleaned: TeamProgress = { ...tp };
+          for (const id of toWipe) {
+            cleaned[id] = {
+              value: 0,
+              completed: false,
+              completedAt: null,
+              perPlayer: {},
+              guesses: [],
+            };
+          }
+          newProgress[tid] = cleaned;
+        }
+        const trimmedWinners = ev.roundWinners.slice(0, msg.fromIndex);
+        set({
+          progress: newProgress,
+          liveLevels: {},
+          event: {
+            ...ev,
+            roundWinners: trimmedWinners,
+            currentRoundIndex: null,
+            currentRoundStatus: null,
+            currentRoundStartsAt: null,
+            // Un-finish if we'd been finished — host is redoing rounds.
+            status: ev.status === "finished" ? "active" : ev.status,
+            winnerTeamId:
+              ev.status === "finished" ? null : ev.winnerTeamId,
+            finishedAt: ev.status === "finished" ? null : ev.finishedAt,
+          },
+        });
         break;
       }
 

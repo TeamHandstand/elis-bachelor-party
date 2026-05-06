@@ -72,6 +72,19 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
       "Every teammate gets one shot at guessing true north. The team's score is the average angular error — smallest avg wins.",
     formatProgress: (v, t) => `${Math.floor(v)} / ${t} guesses in`,
   },
+  "time-guess": {
+    id: "time-guess",
+    label: "Guess The Time",
+    emoji: "⏱",
+    // Threshold is the TARGET ELAPSED TIME in milliseconds (e.g., 30s).
+    defaultThreshold: 30000,
+    unit: "ms target",
+    aggregation: "per-player-once",
+    description:
+      "Each teammate hits GO and then STOP when they think the target time has passed. Smallest avg deviation wins.",
+    formatProgress: (v, t) =>
+      `${Math.floor(v)} guesses in · target ${(t / 1000).toFixed(1)}s`,
+  },
 };
 
 /**
@@ -102,6 +115,10 @@ export function challengeCommand(id: ChallengeId, threshold: number): string {
       return `Spin in place — rack up ${threshold.toLocaleString()} rotations as a team!`;
     case "north":
       return `Each teammate gets one guess at true north — smallest team avg-error wins!`;
+    case "time-guess": {
+      const seconds = (threshold / 1000).toFixed(0);
+      return `Each teammate: tap GO, then STOP after ${seconds} seconds — closest avg wins!`;
+    }
   }
 }
 
@@ -113,6 +130,7 @@ export const CHALLENGE_ORDER: ChallengeId[] = [
   "shake",
   "spin",
   "north",
+  "time-guess",
 ];
 
 export function defaultChallengeConfig(): EventConfig["challenges"] {

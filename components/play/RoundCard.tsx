@@ -16,6 +16,9 @@ interface Props {
   state: RoundCardState;
   code: string;
   isMyTeamWinner: boolean;
+  // Medal reflecting MY team's place in this round (🥇/🥈/🥉/💩). Only set
+  // for past + current-decided cards.
+  myMedal?: string | null;
   children?: React.ReactNode; // host controls slot
 }
 
@@ -27,6 +30,7 @@ export function RoundCard({
   state,
   code,
   isMyTeamWinner,
+  myMedal,
   children,
 }: Props) {
   const def = CHALLENGES[challenge];
@@ -41,7 +45,9 @@ export function RoundCard({
       toneClasses = "bg-bg-card text-white border border-white/10";
       trailing = state.winner ? (
         <div className="flex items-center gap-2">
-          <span className="text-xl">🥇</span>
+          <span className="text-xl" aria-label="your team's medal">
+            {myMedal ?? "🥇"}
+          </span>
           <span className="text-2xl">{state.winner.emoji}</span>
         </div>
       ) : null;
@@ -50,7 +56,9 @@ export function RoundCard({
       toneClasses = "bg-bg-card text-white border-2 border-accent-orange/40";
       trailing = state.winner ? (
         <div className="flex items-center gap-2">
-          <span className="text-xl">🥇</span>
+          <span className="text-xl" aria-label="your team's medal">
+            {myMedal ?? "🥇"}
+          </span>
           <span className="text-2xl">{state.winner.emoji}</span>
         </div>
       ) : null;

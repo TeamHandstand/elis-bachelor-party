@@ -68,7 +68,19 @@ export function TapsView({ code, myPlayerId }: Props) {
         bufferRef.current += 1;
         setPendingMine((p) => p + 1);
         setFlash((f) => !f);
-        if (bufferRef.current >= BATCH_SIZE) {
+        // Flush when batch is full, OR when our local view is within reach
+        // of the threshold so the round can decide before the user keeps
+        // tapping. (Race: previously the user could see "10 / 10" locally
+        // while the team value lagged at 9 because the buffered taps hadn't
+        // shipped. Flushing eagerly near the line fixes that.)
+        const store = useToastyStore.getState();
+        const teamSoFar = Math.floor(
+          store.progress[myTeamId]?.taps?.value ?? 0,
+        );
+        const projected = teamSoFar + bufferRef.current;
+        const reachedThreshold =
+          typeof threshold === "number" && projected >= threshold;
+        if (bufferRef.current >= BATCH_SIZE || reachedThreshold) {
           const flush = bufferRef.current;
           bufferRef.current = 0;
           publisher({

@@ -9,6 +9,10 @@ interface Props {
   // when the host opens the picker.
   winsByTeamId: Record<string, number>;
   onEnd: (winnerTeamId: string | null) => Promise<void> | void; // null = no winner
+  // When true, all rounds are decided and the host is just releasing the
+  // already-computed scoreboard. Switches the button copy from
+  // "END EVENT NOW" to a celebratory "RELEASE FINAL SCORES".
+  releaseMode?: boolean;
 }
 
 /**
@@ -16,7 +20,12 @@ interface Props {
  * top of the journey view. Tapping opens a picker that pre-highlights the
  * team currently leading by round wins; the host can confirm or override.
  */
-export function EndHeptathlonControls({ teams, winsByTeamId, onEnd }: Props) {
+export function EndHeptathlonControls({
+  teams,
+  winsByTeamId,
+  onEnd,
+  releaseMode = false,
+}: Props) {
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
 
@@ -50,9 +59,13 @@ export function EndHeptathlonControls({ teams, winsByTeamId, onEnd }: Props) {
         type="button"
         disabled={busy}
         onClick={() => setPicking(true)}
-        className="w-full py-4 rounded-2xl bg-accent-pink text-white font-display text-lg font-extrabold tracking-widest shadow-lg shadow-accent-pink/30 disabled:opacity-50 active:scale-[0.99] transition-transform"
+        className={`w-full py-4 rounded-2xl text-white font-display text-lg font-extrabold tracking-widest shadow-lg disabled:opacity-50 active:scale-[0.99] transition-transform ${
+          releaseMode
+            ? "bg-gradient-party shadow-accent-orange/40 animate-pulse"
+            : "bg-accent-pink shadow-accent-pink/30"
+        }`}
       >
-        🛑 END EVENT NOW
+        {releaseMode ? "🎉 RELEASE FINAL SCORES" : "🛑 END EVENT NOW"}
       </button>
     );
   }

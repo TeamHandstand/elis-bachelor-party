@@ -15,8 +15,15 @@ import { HostRoundControls, type EndPickerEntry } from "./HostRoundControls";
 import { CHALLENGES } from "@/lib/challenges";
 import { CountdownOverlay } from "./CountdownOverlay";
 import Link from "next/link";
-import { startRound, endRound, endEvent } from "@/components/host/_fetch";
+import {
+  endEvent,
+  endRound,
+  resetRound,
+  startRound,
+} from "@/components/host/_fetch";
 import { EndHeptathlonControls } from "./EndHeptathlonControls";
+import { FinaleLock } from "./FinaleLock";
+import { Confetti } from "./Confetti";
 import { useCookieHost } from "@/lib/auth/use-cookie-host";
 import type { ChallengeId } from "@/lib/types";
 
@@ -108,6 +115,54 @@ export function JourneyView({ code, myPlayerId }: Props) {
   const currentStatus = event.currentRoundStatus;
   const totalRounds = order.length;
 
+  // For each past / current-decided round, compute MY team's place using
+  // the same scoring as RoundResults (north uses smallest avg error, others
+  // use earliest completion). Medals: 1=🥇, 2=🥈, 3=🥉, 4+=💩.
+  function medalForPlace(place: number | null): string | null {
+    if (place === null) return null;
+    if (place === 1) return "🥇";
+    if (place === 2) return "🥈";
+    if (place === 3) return "🥉";
+    return "💩";
+  }
+  function computeMyPlace(challenge: ChallengeId): number | null {
+    if (!myTeamId) return null;
+    const teamIds = Object.keys(teams);
+    if (teamIds.length === 0) return null;
+    const scored = teamIds.map((tid) => {
+      const cur = progressMap[tid]?.[challenge];
+      return {
+        teamId: tid,
+        completedAt: cur?.completedAt ?? null,
+        value: cur?.value ?? 0,
+        guesses: cur?.guesses ?? [],
+      };
+    });
+    if (challenge === "north" || challenge === "time-guess") {
+      scored.sort((a, b) => {
+        const ag = a.guesses.length;
+        const bg = b.guesses.length;
+        if ((ag > 0) !== (bg > 0)) return ag > 0 ? -1 : 1;
+        if (ag === 0 && bg === 0) return 0;
+        const aAvg = a.guesses.reduce((s, g) => s + g.errorDeg, 0) / ag;
+        const bAvg = b.guesses.reduce((s, g) => s + g.errorDeg, 0) / bg;
+        return aAvg - bAvg;
+      });
+    } else {
+      scored.sort((a, b) => {
+        const aDone = a.completedAt !== null;
+        const bDone = b.completedAt !== null;
+        if (aDone !== bDone) return aDone ? -1 : 1;
+        if (aDone && bDone) {
+          return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
+        }
+        return b.value - a.value;
+      });
+    }
+    const idx = scored.findIndex((s) => s.teamId === myTeamId);
+    return idx >= 0 ? idx + 1 : null;
+  }
+
   const cards: Array<{
     ordinal: number;
     challenge: ChallengeId;
@@ -141,8 +196,16 @@ export function JourneyView({ code, myPlayerId }: Props) {
   // own START HEPTATHLON button (which calls /activate); the journey only
   // handles per-round starts once the event is active.
   let startTarget: { ordinal: number; label: string } | null = null;
-  if (currentStatus === null && event.roundWinners.length === 0) {
-    startTarget = { ordinal: 1, label: "START ROUND 1" };
+  if (currentStatus === null) {
+    // No round in flight — start the next one without a winner.
+    const nextIdx = event.roundWinners.length;
+    if (nextIdx < totalRounds) {
+      startTarget = {
+        ordinal: nextIdx + 1,
+        label:
+          nextIdx === 0 ? "START ROUND 1" : `START ROUND ${nextIdx + 1}`,
+      };
+    }
   } else if (
     currentStatus === "decided" &&
     (currentIdx ?? -1) + 1 < totalRounds
@@ -180,15 +243,29 @@ export function JourneyView({ code, myPlayerId }: Props) {
     }
   }
 
-  async function handleRedo(roundIndex: number) {
+  const [redoTarget, setRedoTarget] = useState<{
+    roundIndex: number;
+    label: string;
+  } | null>(null);
+  const [redoBusy, setRedoBusy] = useState(false);
+
+  function requestRedo(roundIndex: number, label: string) {
+    setRedoTarget({ roundIndex, label });
+  }
+
+  async function confirmRedo() {
+    if (!redoTarget || redoBusy) return;
+    setRedoBusy(true);
     try {
-      await startRound(code, {
+      await resetRound(code, {
         ...(myPlayerId ? { playerId: myPlayerId } : {}),
-        redo: true,
-        roundIndex,
+        roundIndex: redoTarget.roundIndex,
       });
+      setRedoTarget(null);
     } catch (err) {
-      console.error("[journey] redoRound failed", err);
+      console.error("[journey] resetRound failed", err);
+    } finally {
+      setRedoBusy(false);
     }
   }
 
@@ -202,6 +279,19 @@ export function JourneyView({ code, myPlayerId }: Props) {
       console.error("[journey] endEvent failed", err);
     }
   }
+
+  // All rounds decided but the host hasn't released yet → players stay
+  // locked in a sparkly waiting room. Host sees the standings and a big
+  // RELEASE button (re-using EndHeptathlonControls).
+  const allRoundsDone =
+    totalRounds > 0 && event.roundWinners.length >= totalRounds;
+  const pendingRelease = allRoundsDone && event.status === "active";
+
+  // Confetti when status flips to finished — fire once per page life.
+  const [confettiFired, setConfettiFired] = useState(false);
+  useEffect(() => {
+    if (event.status === "finished") setConfettiFired(true);
+  }, [event.status]);
 
   return (
     <>
@@ -221,8 +311,9 @@ export function JourneyView({ code, myPlayerId }: Props) {
         <TeamHeader />
         <TeammateOrbit />
 
-        {/* Big red END EVENT affordance — host only, pinned up top so it's
-            always reachable without scrolling. */}
+        {/* Big END / RELEASE affordance — host only. Label changes once all
+            rounds are decided so the host knows tapping it locks in the
+            scoreboard. */}
         {isHost && event.status === "active" && (
           <div className="mt-2">
             <EndHeptathlonControls
@@ -231,12 +322,13 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 standings.map((s) => [s.team.id, s.wins]),
               )}
               onEnd={handleEndEvent}
+              releaseMode={pendingRelease}
             />
           </div>
         )}
 
-        {/* Cookie-hosts get a "back to events list" link. */}
-        {isCookieHost && (
+        {/* Hosts get a "back to events list" link. */}
+        {isHost && (
           <Link
             href="/host"
             className="self-center text-xs opacity-60 underline mt-2"
@@ -297,7 +389,12 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 hostControls = (
                   <HostRoundControls
                     variant={{ kind: "redo" }}
-                    onRedo={() => handleRedo(card.ordinal - 1)}
+                    onRedo={() =>
+                      requestRedo(
+                        card.ordinal - 1,
+                        `Round ${card.ordinal} · ${CHALLENGES[card.challenge].label}`,
+                      )
+                    }
                   />
                 );
               } else if (
@@ -317,11 +414,22 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 hostControls = (
                   <HostRoundControls
                     variant={{ kind: "redo" }}
-                    onRedo={() => handleRedo(card.ordinal - 1)}
+                    onRedo={() =>
+                      requestRedo(
+                        card.ordinal - 1,
+                        `Round ${card.ordinal} · ${CHALLENGES[card.challenge].label}`,
+                      )
+                    }
                   />
                 );
               }
             }
+
+            const myMedal =
+              card.state.kind === "past" ||
+              card.state.kind === "current-decided"
+                ? medalForPlace(computeMyPlace(card.challenge))
+                : null;
 
             return (
               <RoundCard
@@ -331,6 +439,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                 state={card.state}
                 code={code}
                 isMyTeamWinner={isMyTeamWinner}
+                myMedal={myMedal}
               >
                 {hostControls}
               </RoundCard>
@@ -339,6 +448,59 @@ export function JourneyView({ code, myPlayerId }: Props) {
         </div>
 
       </main>
+
+      {/* Pre-release waiting room — players (non-host) only. */}
+      {pendingRelease && !isHost && (
+        <FinaleLock groomName={event.groomName} />
+      )}
+
+      {/* Confetti when the host releases the final scoreboard. */}
+      <Confetti fire={confettiFired} />
+
+      {redoTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-3"
+          onClick={() => {
+            if (!redoBusy) setRedoTarget(null);
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl bg-bg-card border-2 border-accent-pink/60 p-5 shadow-2xl"
+          >
+            <div className="text-center">
+              <div className="text-5xl mb-2">↻</div>
+              <div className="font-display text-xl font-extrabold tracking-wider mb-2">
+                REDO {redoTarget.label.toUpperCase()}?
+              </div>
+              <div className="text-sm opacity-80 max-w-xs mx-auto">
+                This wipes that round&rsquo;s progress and any rounds after it.
+                You&rsquo;ll need to tap <b>START</b> on the round to begin
+                again.
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={confirmRedo}
+                disabled={redoBusy}
+                className="w-full py-4 rounded-2xl bg-accent-pink text-white font-display text-base font-extrabold tracking-widest disabled:opacity-50"
+              >
+                {redoBusy ? "RESETTING…" : "✓ YES, RESET THIS ROUND"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setRedoTarget(null)}
+                disabled={redoBusy}
+                className="w-full py-3 rounded-2xl bg-bg-deep border border-white/20 font-display text-sm font-extrabold tracking-widest disabled:opacity-50"
+              >
+                ✕ CANCEL
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

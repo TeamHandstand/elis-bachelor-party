@@ -27,6 +27,7 @@ const ChallengesSchema = z
     shake: ChallengeEntrySchema,
     spin: ChallengeEntrySchema,
     north: ChallengeEntrySchema,
+    "time-guess": ChallengeEntrySchema,
   })
   .strict();
 

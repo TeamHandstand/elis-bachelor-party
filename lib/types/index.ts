@@ -7,7 +7,8 @@ export type ChallengeId =
   | "scream"
   | "shake"
   | "spin"
-  | "north";
+  | "north"
+  | "time-guess";
 
 export type EventStatus = "lobby" | "active" | "finished";
 
@@ -53,7 +54,8 @@ export interface NorthGuessMsg {
   kind: "guess";
   playerId: string;
   teamId: string;
-  challenge: "north";
+  // Reused for both north (degrees off) and time-guess (ms deviation).
+  challenge: "north" | "time-guess";
   errorDeg: number;
   ts: number;
 }
@@ -88,6 +90,12 @@ export interface TeamAssignmentMsg {
 
 export interface ProgressResetMsg {
   kind: "progress-reset";
+  ts: number;
+}
+
+export interface RoundResetMsg {
+  kind: "round-reset";
+  fromIndex: number;
   ts: number;
 }
 
@@ -138,6 +146,7 @@ export type ProgressMsg =
   | PlayerJoinedMsg
   | TeamAssignmentMsg
   | ProgressResetMsg
+  | RoundResetMsg
   | RoundStartMsg
   | RoundEndMsg
   | HostChangedMsg

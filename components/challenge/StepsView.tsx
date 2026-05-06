@@ -12,7 +12,9 @@ interface Props {
   myPlayerId: string;
 }
 
-const BATCH_SIZE = 5;
+// Smaller batch = display ticks closer to real time. We also short-circuit
+// the batch when the team value is one step away from the threshold.
+const BATCH_SIZE = 2;
 
 type PermState = "idle" | "requesting" | "granted" | "denied";
 
@@ -37,6 +39,26 @@ export function StepsView({ code, myPlayerId }: Props) {
   const bufferRef = useRef(0);
   const sensorRef = useRef<StepCounter | null>(null);
   const unsubRef = useRef<Unsubscribe | null>(null);
+  const [pendingMine, setPendingMine] = useState(0);
+
+  // Decrement pendingMine as the server credits our steps. Mirrors the
+  // pattern in TapsView so the displayed counter is always
+  // teamValue + pendingMine and ticks on every step.
+  const myCreditedSteps = Math.floor(
+    (myProgress?.steps.perPlayer?.[myPlayerId] ?? 0) as number,
+  );
+  const lastCreditedRef = useRef(0);
+  useEffect(() => {
+    const prev = lastCreditedRef.current;
+    if (myCreditedSteps > prev) {
+      const delta = myCreditedSteps - prev;
+      setPendingMine((p) => Math.max(0, p - delta));
+      lastCreditedRef.current = myCreditedSteps;
+    } else if (myCreditedSteps < prev) {
+      setPendingMine(0);
+      lastCreditedRef.current = myCreditedSteps;
+    }
+  }, [myCreditedSteps]);
 
   const startListening = useCallback(async () => {
     if (!myTeamId || unsubRef.current) return;
@@ -44,7 +66,17 @@ export function StepsView({ code, myPlayerId }: Props) {
     unsubRef.current = await sensorRef.current.start(() => {
       bufferRef.current += 1;
       setStomp((s) => s + 1);
-      if (bufferRef.current >= BATCH_SIZE) {
+      setPendingMine((p) => p + 1);
+      const store = useToastyStore.getState();
+      const ev = store.event;
+      const teamSoFar = Math.floor(
+        store.progress[myTeamId]?.steps?.value ?? 0,
+      );
+      const liveThreshold =
+        ev?.challenges.steps.threshold ?? CHALLENGES.steps.defaultThreshold;
+      const projected = teamSoFar + bufferRef.current;
+      const reachedThreshold = projected >= liveThreshold;
+      if (bufferRef.current >= BATCH_SIZE || reachedThreshold) {
         const flush = bufferRef.current;
         bufferRef.current = 0;
         publisher({
@@ -121,7 +153,10 @@ export function StepsView({ code, myPlayerId }: Props) {
 
   const def = CHALLENGES.steps;
   const threshold = event?.challenges.steps.threshold ?? def.defaultThreshold;
-  const value = Math.floor(myProgress?.steps.value ?? 0);
+  const teamValue = Math.floor(myProgress?.steps.value ?? 0);
+  // Show the team value with our local in-flight steps applied so the
+  // counter ticks on every footfall, not every batch flush.
+  const displayedTeam = Math.min(teamValue + pendingMine, threshold);
 
   if (perm !== "granted") {
     const denied = perm === "denied";
@@ -174,7 +209,7 @@ export function StepsView({ code, myPlayerId }: Props) {
         👟
       </div>
       <div className="font-display text-7xl font-extrabold tabular-nums">
-        {value.toLocaleString()}
+        {displayedTeam.toLocaleString()}
       </div>
       <div className="text-sm uppercase tracking-widest opacity-70 mt-1">
         of {threshold.toLocaleString()} steps
