@@ -167,6 +167,9 @@ export interface RoundWinnerEntry {
   challenge: ChallengeId;
   teamId: string;
   decidedAt: number;
+  // ms epoch — when the round started. Optional for back-compat with rows
+  // written before this field existed.
+  startedAt?: number | null;
 }
 
 export type RoundStatus = "live" | "decided";

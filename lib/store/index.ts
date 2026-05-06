@@ -305,6 +305,7 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
             challenge: msg.challenge,
             teamId: msg.winnerTeamId,
             decidedAt: msg.decidedAt,
+            startedAt: ev.currentRoundStartsAt,
           },
         ];
         set({
