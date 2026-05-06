@@ -6,6 +6,7 @@ import { usePublisher } from "@/lib/store/bootstrap";
 import { CHALLENGES } from "@/lib/challenges";
 import { DbMeter } from "@/lib/sensors/db-meter";
 import { PermissionGate } from "@/components/permissions/PermissionGate";
+import { FLAPPY_CONFIG } from "./flappy-config";
 
 interface Props {
   code: string;
@@ -13,32 +14,17 @@ interface Props {
   roundIndex: number;
 }
 
-// dB threshold above which the bird flaps. Loud-talk territory; teams that
-// just chat softly won't accidentally fly. Tuned to roughly the same band as
-// the scream challenge, but lower because flapping should feel reactive.
-const FLAP_DB = 70;
-// World units (px) per second of horizontal scroll.
-const WORLD_SPEED = 140;
-// Pixels per meter of "distance" credited. Feel: ~1.4 m/s while alive.
-const PX_PER_METER = 100;
-// Death cooldown before bird respawns, in ms.
-const COOLDOWN_MS = 3000;
-// Gravity (px/s²) and per-flap upward velocity boost (px/s).
-const GRAVITY = 900;
-const FLAP_VY = -360;
-// Minimum gap between flaps so a sustained yell doesn't pin the bird at the
-// ceiling — instead it gets a bounce on/off rhythm.
-const FLAP_COOLDOWN_MS = 220;
-// Pipe geometry.
-const PIPE_WIDTH = 60;
-const PIPE_GAP = 170;
-const PIPE_SPACING_PX = 280;
-// Bird hitbox.
-const BIRD_RADIUS = 16;
-const BIRD_X = 80;
-
-const PUBLISH_INTERVAL_MS = 500;
-const PUBLISH_MIN_DELTA_M = 1;
+// Map a dB reading to an upward velocity boost. Below threshold → 0 (no
+// flap). At saturation → max flap. Linear in between. Velocities are
+// negative because canvas Y grows downward.
+function flapVelocityForDb(db: number): number {
+  const { flapThresholdDb, flapSaturationDb, flapVelocityMin, flapVelocityMax } =
+    FLAPPY_CONFIG;
+  if (db < flapThresholdDb) return 0;
+  const span = flapSaturationDb - flapThresholdDb;
+  const t = span <= 0 ? 1 : Math.min(1, (db - flapThresholdDb) / span);
+  return flapVelocityMin + (flapVelocityMax - flapVelocityMin) * t;
+}
 
 interface Pipe {
   x: number; // left edge in world units (canvas coords)
@@ -131,6 +117,7 @@ function FlappyChallenge({
     const canvas = canvasRef.current;
     if (!canvas || !myTeamId) return;
     if (size.w === 0 || size.h === 0) return;
+    const cfg = FLAPPY_CONFIG;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.floor(size.w * dpr);
     canvas.height = Math.floor(size.h * dpr);
@@ -149,7 +136,6 @@ function FlappyChallenge({
     let birdVy = 0;
     let lastFlapAt = 0;
     let pipes: Pipe[] = [];
-    let nextPipeAtPx = W + 80;
     let scrollPx = 0;
     let unpublishedM = 0; // meters earned but not yet published
     let myMeters = 0; // total meters this player has earned this round
@@ -158,17 +144,19 @@ function FlappyChallenge({
     let raf = 0;
 
     function spawnPipe(targetX: number) {
-      const minGapTop = 40;
-      const maxGapTop = Math.max(minGapTop + 1, H - PIPE_GAP - 40);
+      const minGapTop = cfg.pipeMinGapTop;
+      const maxGapTop = Math.max(
+        minGapTop + 1,
+        H - cfg.pipeGap - cfg.pipeBottomMargin,
+      );
       const gapY = minGapTop + Math.random() * (maxGapTop - minGapTop);
       pipes.push({ x: targetX, gapY, scored: false });
     }
 
     // Seed first few pipes off-screen to the right.
     spawnPipe(W + 80);
-    spawnPipe(W + 80 + PIPE_SPACING_PX);
-    spawnPipe(W + 80 + PIPE_SPACING_PX * 2);
-    nextPipeAtPx = scrollPx + PIPE_SPACING_PX * 3;
+    spawnPipe(W + 80 + cfg.pipeSpacingPx);
+    spawnPipe(W + 80 + cfg.pipeSpacingPx * 2);
 
     function reset() {
       state = "alive";
@@ -176,20 +164,19 @@ function FlappyChallenge({
       birdVy = 0;
       pipes = [];
       spawnPipe(W + 80);
-      spawnPipe(W + 80 + PIPE_SPACING_PX);
-      spawnPipe(W + 80 + PIPE_SPACING_PX * 2);
-      nextPipeAtPx = scrollPx + PIPE_SPACING_PX * 3;
+      spawnPipe(W + 80 + cfg.pipeSpacingPx);
+      spawnPipe(W + 80 + cfg.pipeSpacingPx * 2);
     }
 
     function die() {
       state = "cooldown";
-      cooldownEndAt = performance.now() + COOLDOWN_MS;
+      cooldownEndAt = performance.now() + cfg.cooldownMs;
     }
 
     function flush(force: boolean) {
       if (!myTeamId) return;
       if (unpublishedM <= 0) return;
-      if (!force && unpublishedM < PUBLISH_MIN_DELTA_M) return;
+      if (!force && unpublishedM < cfg.publishMinDeltaM) return;
       const delta = unpublishedM;
       unpublishedM = 0;
       myMeters += delta;
@@ -215,19 +202,26 @@ function FlappyChallenge({
       }
 
       if (state === "alive") {
-        // Yelling above threshold gives an upward velocity kick on a cooldown.
+        // Volume-modulated flap. The flap fires when the player is loud
+        // enough AND the per-flap cooldown has elapsed; the *size* of the
+        // flap (the Vy boost) scales with how loud they are at flap time.
+        // A whisper-yell nudges the bird; a full scream sends it to the
+        // ceiling.
         const db = dbRef.current;
-        if (db >= FLAP_DB && now - lastFlapAt >= FLAP_COOLDOWN_MS) {
-          birdVy = FLAP_VY;
+        if (db >= cfg.flapThresholdDb && now - lastFlapAt >= cfg.flapCooldownMs) {
+          const vy = flapVelocityForDb(db);
+          // Take whichever is more upward — so a partial flap during an
+          // already-rising bird doesn't damp it.
+          birdVy = Math.min(birdVy, vy);
           lastFlapAt = now;
         }
-        birdVy += GRAVITY * dt;
+        birdVy += cfg.gravity * dt;
         birdY += birdVy * dt;
 
         // World scroll — credits meters only while alive.
-        const scrollDelta = WORLD_SPEED * dt;
+        const scrollDelta = cfg.worldSpeed * dt;
         scrollPx += scrollDelta;
-        unpublishedM += scrollDelta / PX_PER_METER;
+        unpublishedM += scrollDelta / cfg.pxPerMeter;
 
         // Move pipes left. (Pipes carry world coords; we draw with x as-is
         // since the camera is fixed at scrollPx.)
@@ -236,17 +230,17 @@ function FlappyChallenge({
         // Spawn new pipes ahead.
         while (
           pipes.length === 0 ||
-          pipes[pipes.length - 1].x < W + PIPE_SPACING_PX
+          pipes[pipes.length - 1].x < W + cfg.pipeSpacingPx
         ) {
           const lastX =
             pipes.length > 0 ? pipes[pipes.length - 1].x : W + 80;
-          spawnPipe(lastX + PIPE_SPACING_PX);
+          spawnPipe(lastX + cfg.pipeSpacingPx);
         }
         // Drop off-screen pipes.
-        pipes = pipes.filter((p) => p.x + PIPE_WIDTH > -10);
+        pipes = pipes.filter((p) => p.x + cfg.pipeWidth > -10);
 
         // Collision: out-of-bounds (top/bottom).
-        if (birdY < BIRD_RADIUS || birdY > H - BIRD_RADIUS) {
+        if (birdY < cfg.birdRadius || birdY > H - cfg.birdRadius) {
           die();
           flush(true);
         }
@@ -255,12 +249,12 @@ function FlappyChallenge({
         // outside the gap vertically.
         for (const p of pipes) {
           const pl = p.x;
-          const pr = p.x + PIPE_WIDTH;
-          if (BIRD_X + BIRD_RADIUS < pl) continue;
-          if (BIRD_X - BIRD_RADIUS > pr) continue;
+          const pr = p.x + cfg.pipeWidth;
+          if (cfg.birdX + cfg.birdRadius < pl) continue;
+          if (cfg.birdX - cfg.birdRadius > pr) continue;
           const gapTop = p.gapY;
-          const gapBot = p.gapY + PIPE_GAP;
-          if (birdY - BIRD_RADIUS < gapTop || birdY + BIRD_RADIUS > gapBot) {
+          const gapBot = p.gapY + cfg.pipeGap;
+          if (birdY - cfg.birdRadius < gapTop || birdY + cfg.birdRadius > gapBot) {
             die();
             flush(true);
             break;
@@ -268,7 +262,7 @@ function FlappyChallenge({
         }
 
         // Periodic publish.
-        if (now - lastPublishAt >= PUBLISH_INTERVAL_MS) {
+        if (now - lastPublishAt >= cfg.publishIntervalMs) {
           lastPublishAt = now;
           flush(false);
         }
@@ -293,30 +287,30 @@ function FlappyChallenge({
       // Pipes
       for (const p of pipes) {
         ctx.fillStyle = "#2cd06a";
-        ctx.fillRect(p.x, 0, PIPE_WIDTH, p.gapY);
-        ctx.fillRect(p.x, p.gapY + PIPE_GAP, PIPE_WIDTH, H - (p.gapY + PIPE_GAP));
+        ctx.fillRect(p.x, 0, cfg.pipeWidth, p.gapY);
+        ctx.fillRect(p.x, p.gapY + cfg.pipeGap, cfg.pipeWidth, H - (p.gapY + cfg.pipeGap));
         // Lip
         ctx.fillStyle = "#1ea655";
-        ctx.fillRect(p.x - 2, p.gapY - 12, PIPE_WIDTH + 4, 12);
-        ctx.fillRect(p.x - 2, p.gapY + PIPE_GAP, PIPE_WIDTH + 4, 12);
+        ctx.fillRect(p.x - 2, p.gapY - 12, cfg.pipeWidth + 4, 12);
+        ctx.fillRect(p.x - 2, p.gapY + cfg.pipeGap, cfg.pipeWidth + 4, 12);
       }
 
       // Bird
       ctx.save();
-      ctx.translate(BIRD_X, birdY);
+      ctx.translate(cfg.birdX, birdY);
       const tilt = Math.max(-0.5, Math.min(0.8, birdVy / 600));
       ctx.rotate(tilt);
       // body
       ctx.fillStyle = state === "cooldown" ? "#666" : "#ffce4d";
       ctx.beginPath();
-      ctx.arc(0, 0, BIRD_RADIUS, 0, Math.PI * 2);
+      ctx.arc(0, 0, cfg.birdRadius, 0, Math.PI * 2);
       ctx.fill();
       // beak
       ctx.fillStyle = "#ff8c42";
       ctx.beginPath();
-      ctx.moveTo(BIRD_RADIUS - 2, -2);
-      ctx.lineTo(BIRD_RADIUS + 8, 0);
-      ctx.lineTo(BIRD_RADIUS - 2, 4);
+      ctx.moveTo(cfg.birdRadius - 2, -2);
+      ctx.lineTo(cfg.birdRadius + 8, 0);
+      ctx.lineTo(cfg.birdRadius - 2, 4);
       ctx.closePath();
       ctx.fill();
       // eye
@@ -375,10 +369,12 @@ function FlappyChallenge({
           <span>you: {Math.floor(hud.myMeters)}m</span>
           <span
             className={`tabular-nums ${
-              hud.db >= FLAP_DB ? "text-accent-orange font-extrabold" : ""
+              hud.db >= FLAPPY_CONFIG.flapThresholdDb
+                ? "text-accent-orange font-extrabold"
+                : ""
             }`}
           >
-            {Math.round(hud.db)} dB · flap @ {FLAP_DB}
+            {Math.round(hud.db)} dB · flap @ {FLAPPY_CONFIG.flapThresholdDb}
           </span>
         </div>
       </div>
@@ -403,7 +399,8 @@ function FlappyChallenge({
           </div>
         )}
         <div className="absolute bottom-2 left-0 right-0 text-center text-[11px] opacity-60 px-3 pointer-events-none">
-          YELL to flap. Above {FLAP_DB} dB sends the bird up.
+          YELL to flap. Louder = bigger jump (
+          {FLAPPY_CONFIG.flapThresholdDb}–{FLAPPY_CONFIG.flapSaturationDb} dB).
         </div>
       </div>
     </div>

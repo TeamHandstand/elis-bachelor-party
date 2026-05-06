@@ -15,10 +15,12 @@ import {
 } from "./schema";
 import {
   CHALLENGES,
+  DEFAULT_INTERLEAVE_SEGMENTS,
   DEFAULT_PUNISHMENT_MESSAGE,
   coerceRounds,
   coerceTriviaQuestions,
   defaultRounds,
+  interleaveTotal,
 } from "@/lib/challenges";
 import type {
   ChallengeId,
@@ -246,6 +248,27 @@ export async function updateEvent(
             typeof r.message === "string" && r.message.trim()
               ? r.message
               : DEFAULT_PUNISHMENT_MESSAGE,
+        };
+      }
+      if (r.challenge === "interleave") {
+        // Filter out malformed segments and snap threshold to the canonical
+        // sum-of-counts. Without this branch the default `{challenge, threshold}`
+        // shape below would silently drop the segment list every save.
+        const segs = (r.segments ?? DEFAULT_INTERLEAVE_SEGMENTS)
+          .filter(
+            (s): s is { kind: "spin" | "steps"; count: number } =>
+              !!s &&
+              (s.kind === "spin" || s.kind === "steps") &&
+              typeof s.count === "number" &&
+              Number.isFinite(s.count) &&
+              s.count > 0,
+          )
+          .map((s) => ({ kind: s.kind, count: Math.floor(s.count) }));
+        const safeSegs = segs.length > 0 ? segs : DEFAULT_INTERLEAVE_SEGMENTS;
+        return {
+          challenge: r.challenge,
+          threshold: interleaveTotal(safeSegs),
+          segments: safeSegs,
         };
       }
       return { challenge: r.challenge, threshold: r.threshold };
