@@ -4,7 +4,12 @@ import { useState } from "react";
 import { useToastyStore } from "@/lib/store";
 import { useTeammates } from "@/lib/store/selectors";
 import { CHALLENGES } from "@/lib/challenges";
-import type { ChallengeId, Player, TeamProgress } from "@/lib/types";
+import type {
+  ChallengeId,
+  EventConfig,
+  Player,
+  TeamProgress,
+} from "@/lib/types";
 import { RenameModal } from "./RenameModal";
 
 const AVATAR_GRADIENTS = [
@@ -16,14 +21,17 @@ const AVATAR_GRADIENTS = [
 function topContribution(
   player: Player,
   progress: TeamProgress | null,
+  rounds: EventConfig["rounds"],
 ): { challenge: ChallengeId; value: number } | null {
   if (!progress) return null;
   let best: { challenge: ChallengeId; value: number } | null = null;
-  for (const id of Object.keys(progress) as ChallengeId[]) {
-    const cur = progress[id];
+  for (let idx = 0; idx < rounds.length; idx++) {
+    const cur = progress[idx];
+    if (!cur) continue;
     const v = cur.perPlayer?.[player.id] ?? 0;
     if (v <= 0) continue;
-    if (!best || v > best.value) best = { challenge: id, value: v };
+    if (!best || v > best.value)
+      best = { challenge: rounds[idx].challenge, value: v };
   }
   return best;
 }
@@ -96,7 +104,7 @@ export function TeammateOrbit() {
     <>
       <div className="flex justify-center gap-2 my-3">
         {ordered.map((p, i) => {
-          const top = topContribution(p, myProgress);
+          const top = topContribution(p, myProgress, event?.rounds ?? []);
           const initial = (p.name?.trim()?.[0] ?? "?").toUpperCase();
           const isMe = p.id === myPlayerId;
           const InnerEl = isMe ? "button" : "div";

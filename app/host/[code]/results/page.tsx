@@ -1,8 +1,7 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import type { ResultsResponse } from "@/lib/api/contract";
-import type { ChallengeId } from "@/lib/types";
-import { CHALLENGES, CHALLENGE_ORDER } from "@/lib/challenges";
+import { CHALLENGES } from "@/lib/challenges";
 
 async function fetchResults(code: string): Promise<ResultsResponse | null> {
   const h = await headers();
@@ -47,14 +46,14 @@ export default async function ResultsPage({ params }: PageProps) {
   }
 
   const { event, teams, players, finalProgress } = data;
-  const enabled = CHALLENGE_ORDER.filter((id) => event.challenges[id]?.enabled);
+  const rounds = event.rounds;
 
-  // Build [teamId][challengeId] index
+  // Build [teamId][roundIndex] -> cell
   type Cell = (typeof finalProgress)[number];
-  const matrix: Record<string, Partial<Record<ChallengeId, Cell>>> = {};
+  const matrix: Record<string, Record<number, Cell>> = {};
   for (const row of finalProgress) {
     matrix[row.teamId] ??= {};
-    matrix[row.teamId][row.challenge] = row;
+    matrix[row.teamId][row.roundIndex] = row;
   }
 
   // Round-wins-based ranking (heptathlon model).
@@ -163,13 +162,13 @@ export default async function ResultsPage({ params }: PageProps) {
             🏁 Round-by-round
           </h2>
           <ol className="space-y-2">
-            {enabled.map((id, idx) => {
-              const def = CHALLENGES[id];
+            {rounds.map((r, idx) => {
+              const def = CHALLENGES[r.challenge];
               const w = winnersByRound[idx];
               const winningTeam = w ? teams.find((t) => t.id === w.teamId) : null;
               return (
                 <li
-                  key={id}
+                  key={`${idx}-${r.challenge}`}
                   className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0"
                 >
                   <div className="font-display font-extrabold opacity-60 w-6 text-center tabular-nums">
@@ -194,12 +193,12 @@ export default async function ResultsPage({ params }: PageProps) {
 
         <section className="bg-bg-card rounded-xl2 p-4 overflow-x-auto">
           <h2 className="font-display text-xl font-bold mb-3">
-            📊 Per-challenge breakdown
+            📊 Per-round breakdown
           </h2>
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-left opacity-60">
-                <th className="px-2 py-2">Challenge</th>
+                <th className="px-2 py-2">Round</th>
                 {teams.map((t) => (
                   <th key={t.id} className="px-2 py-2 whitespace-nowrap">
                     {t.emoji} {t.name}
@@ -208,18 +207,20 @@ export default async function ResultsPage({ params }: PageProps) {
               </tr>
             </thead>
             <tbody>
-              {enabled.map((id) => {
-                const def = CHALLENGES[id];
-                const threshold =
-                  event.challenges[id]?.threshold ?? def.defaultThreshold;
+              {rounds.map((r, idx) => {
+                const def = CHALLENGES[r.challenge];
+                const threshold = r.threshold ?? def.defaultThreshold;
                 return (
-                  <tr key={id} className="border-t border-white/5">
+                  <tr key={`${idx}-${r.challenge}`} className="border-t border-white/5">
                     <td className="px-2 py-2 whitespace-nowrap">
+                      <span className="text-xs opacity-60 mr-1 tabular-nums">
+                        {idx + 1}.
+                      </span>
                       <span className="text-lg mr-1">{def.emoji}</span>
                       <span className="font-bold">{def.label}</span>
                     </td>
                     {teams.map((t) => {
-                      const cell = matrix[t.id]?.[id];
+                      const cell = matrix[t.id]?.[idx];
                       const value = cell?.value ?? 0;
                       const completed = cell?.completed ?? false;
                       return (

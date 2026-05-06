@@ -10,6 +10,7 @@ import type { Unsubscribe } from "@/lib/sensors/types";
 interface Props {
   code: string;
   myPlayerId: string;
+  roundIndex: number;
 }
 
 const PUBLISH_INTERVAL_MS = 250;
@@ -18,7 +19,7 @@ const FULL_ROTATION = 360;
 // any motion has been seen. Smaller threshold = more responsive teamwise.
 const PUBLISH_DEGREES = 15;
 
-export function SpinView({ code, myPlayerId }: Props) {
+export function SpinView({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
@@ -36,11 +37,13 @@ export function SpinView({ code, myPlayerId }: Props) {
   const lastPublishRef = useRef(0);
 
   const def = CHALLENGES.spin;
-  const threshold = event?.challenges.spin.threshold ?? def.defaultThreshold;
+  const threshold =
+    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
   // Per heptathlon refactor, value & threshold are in ROTATIONS (team-total).
   // Sensor produces degrees; we convert at publish time.
-  const teamRotations = (myProgress?.spin.value ?? 0) as number;
-  const myRotations = (myProgress?.spin.perPlayer?.[myPlayerId] ?? 0) as number;
+  const teamRotations = (myProgress?.[roundIndex]?.value ?? 0) as number;
+  const myRotations =
+    (myProgress?.[roundIndex]?.perPlayer?.[myPlayerId] ?? 0) as number;
 
   // Decrement pendingRot as the server credits our rotations.
   const lastCreditedRef = useRef(0);
@@ -87,6 +90,7 @@ export function SpinView({ code, myPlayerId }: Props) {
             kind: "progress",
             playerId: myPlayerId,
             teamId: myTeamId,
+            roundIndex,
             challenge: "spin",
             delta: flushDeg / FULL_ROTATION,
             ts: now,
@@ -105,6 +109,7 @@ export function SpinView({ code, myPlayerId }: Props) {
           kind: "progress",
           playerId: myPlayerId,
           teamId: myTeamId,
+          roundIndex,
           challenge: "spin",
           delta: remainder / FULL_ROTATION,
           ts: Date.now(),
@@ -112,7 +117,7 @@ export function SpinView({ code, myPlayerId }: Props) {
       }
       unsub?.();
     };
-  }, [myPlayerId, myTeamId, publisher]);
+  }, [myPlayerId, myTeamId, publisher, roundIndex]);
 
   // Both buttons pressed → resume; otherwise pause.
   useEffect(() => {

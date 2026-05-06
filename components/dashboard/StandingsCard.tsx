@@ -2,7 +2,6 @@
 
 import { useToastyStore } from "@/lib/store";
 import { useRoundStandings } from "@/lib/store/selectors";
-import { enabledChallengeOrder } from "@/lib/challenges";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
@@ -13,7 +12,7 @@ export function StandingsCard() {
 
   if (!event || standings.length === 0) return null;
 
-  const totalRounds = enabledChallengeOrder(event.challenges).length;
+  const totalRounds = event.rounds.length;
   const decidedCount = event.roundWinners.length;
 
   return (

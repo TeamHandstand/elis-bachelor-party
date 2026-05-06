@@ -11,17 +11,6 @@ import type {
   ProgressSnapshotRequest,
   ProgressSnapshotResponse,
 } from "@/lib/api/contract";
-import type { ChallengeId } from "@/lib/types";
-
-const CHALLENGE_IDS: ChallengeId[] = [
-  "distance",
-  "steps",
-  "taps",
-  "scream",
-  "shake",
-  "spin",
-  "north",
-];
 
 const challengeIdSchema = z.enum([
   "distance",
@@ -31,14 +20,16 @@ const challengeIdSchema = z.enum([
   "shake",
   "spin",
   "north",
+  "time-guess",
 ]);
 
 const snapshotSchema = z
   .object({
     teamId: z.string().uuid(),
-    challenges: z.array(
+    rounds: z.array(
       z
         .object({
+          roundIndex: z.number().int().nonnegative(),
           challenge: challengeIdSchema,
           value: z.number().finite().nonnegative(),
           completed: z.boolean(),
@@ -58,12 +49,7 @@ export async function GET(
   if (persisted === null) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  // Sanity: discard any rows for unknown challenges (defensive — schema
-  // shouldn't allow them, but the JSON->ChallengeId cast is permissive).
-  const filtered = persisted.filter((r) =>
-    CHALLENGE_IDS.includes(r.challenge as ChallengeId),
-  );
-  const body: GetProgressResponse = { progress: filtered };
+  const body: GetProgressResponse = { progress: persisted };
   return NextResponse.json(body);
 }
 
@@ -99,10 +85,16 @@ export async function POST(
     return NextResponse.json({ error: "team not in event" }, { status: 400 });
   }
 
+  // Discard rows for round indices that don't exist in the current event.
+  const totalRounds = event.event.rounds.length;
+  const safeRounds = parsed.rounds.filter(
+    (r) => r.roundIndex >= 0 && r.roundIndex < totalRounds,
+  );
+
   await upsertProgressSnapshot({
     eventId: event.event.id,
     teamId: parsed.teamId,
-    challenges: parsed.challenges,
+    rounds: safeRounds,
   });
 
   const body: ProgressSnapshotResponse = { ok: true };

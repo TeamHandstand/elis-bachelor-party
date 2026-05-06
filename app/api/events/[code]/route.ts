@@ -12,30 +12,31 @@ import type {
   UpdateEventResponse,
 } from "@/lib/api/contract";
 
-const ChallengeEntrySchema = z.object({
-  enabled: z.boolean(),
-  threshold: z.number().finite(),
-  order: z.number().int().nonnegative().optional(),
-});
+const ChallengeIdSchema = z.enum([
+  "distance",
+  "steps",
+  "taps",
+  "scream",
+  "shake",
+  "spin",
+  "north",
+  "time-guess",
+]);
 
-const ChallengesSchema = z
+const RoundConfigSchema = z
   .object({
-    distance: ChallengeEntrySchema,
-    steps: ChallengeEntrySchema,
-    taps: ChallengeEntrySchema,
-    scream: ChallengeEntrySchema,
-    shake: ChallengeEntrySchema,
-    spin: ChallengeEntrySchema,
-    north: ChallengeEntrySchema,
-    "time-guess": ChallengeEntrySchema,
+    challenge: ChallengeIdSchema,
+    threshold: z.number().finite().nonnegative(),
   })
   .strict();
+
+const RoundsSchema = z.array(RoundConfigSchema).max(50);
 
 const PatchSchema = z
   .object({
     title: z.string().max(120).optional(),
     groomName: z.string().max(120).optional(),
-    challenges: ChallengesSchema.optional(),
+    rounds: RoundsSchema.optional(),
     teams: z
       .array(
         z

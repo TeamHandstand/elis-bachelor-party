@@ -8,22 +8,33 @@ import type {
   Team,
   TeamProgress,
 } from "@/lib/types";
-import { CHALLENGES, CHALLENGE_ORDER } from "@/lib/challenges";
+import { CHALLENGES } from "@/lib/challenges";
 
 // ---------- Helpers ----------
 
+function emptyCell() {
+  return {
+    value: 0,
+    completed: false,
+    completedAt: null,
+    perPlayer: {} as Record<string, number>,
+    guesses: [] as Array<{ playerId: string; errorDeg: number }>,
+  };
+}
+
 function emptyProgress(): TeamProgress {
-  const p: Partial<TeamProgress> = {};
-  for (const id of CHALLENGE_ORDER) {
-    p[id] = {
-      value: 0,
-      completed: false,
-      completedAt: null,
-      perPlayer: {},
-      guesses: [],
-    };
+  // Empty by default — cells are lazily created when the first message
+  // for that round arrives. UI consumers must tolerate missing keys.
+  return {} as TeamProgress;
+}
+
+function ensureCell(tp: TeamProgress, roundIndex: number) {
+  let cur = tp[roundIndex];
+  if (!cur) {
+    cur = emptyCell();
+    tp[roundIndex] = cur;
   }
-  return p as TeamProgress;
+  return cur;
 }
 
 // ---------- Store shape ----------
@@ -39,7 +50,7 @@ export interface ToastyStore {
   players: Record<string, Player>;
   teams: Record<string, Team>;
 
-  // progress, indexed by team
+  // progress, indexed by team -> round index
   progress: Record<string /*teamId*/, TeamProgress>;
 
   // ephemeral live levels for scream/shake (last sample per player)
@@ -67,6 +78,7 @@ export interface ToastyStore {
   hydrateProgress(
     rows: Array<{
       teamId: string;
+      roundIndex: number;
       challenge: ChallengeId;
       value: number;
       completed: boolean;
@@ -141,13 +153,14 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
       case "progress": {
         const teamProg = state.progress[msg.teamId];
         if (!teamProg) return;
-        const cur = teamProg[msg.challenge];
+        const next: TeamProgress = { ...teamProg };
+        const cur = ensureCell(next, msg.roundIndex);
         const newValue = cur.value + msg.delta;
         const perPlayer = { ...(cur.perPlayer ?? {}) };
         perPlayer[msg.playerId] = (perPlayer[msg.playerId] ?? 0) + msg.delta;
-        const updated = { ...teamProg, [msg.challenge]: { ...cur, value: newValue, perPlayer } };
+        next[msg.roundIndex] = { ...cur, value: newValue, perPlayer };
         set({
-          progress: { ...state.progress, [msg.teamId]: updated },
+          progress: { ...state.progress, [msg.teamId]: next },
         });
         get().recomputeCompletion(msg.teamId);
         break;
@@ -167,23 +180,20 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         if (!teamProg) return;
         // Generic per-player-once: works for north (errorDeg) AND time-guess
         // (errorDeg = ms deviation from target).
-        const ch = msg.challenge;
-        const cur = teamProg[ch];
+        const next: TeamProgress = { ...teamProg };
+        const cur = ensureCell(next, msg.roundIndex);
         const guesses = [...(cur.guesses ?? [])];
         // dedupe per player — they only get one shot
         if (!guesses.some((g) => g.playerId === msg.playerId)) {
           guesses.push({ playerId: msg.playerId, errorDeg: msg.errorDeg });
         }
-        const updated = {
-          ...teamProg,
-          [ch]: {
-            ...cur,
-            value: guesses.length,
-            guesses,
-          },
+        next[msg.roundIndex] = {
+          ...cur,
+          value: guesses.length,
+          guesses,
         };
         set({
-          progress: { ...state.progress, [msg.teamId]: updated },
+          progress: { ...state.progress, [msg.teamId]: next },
         });
         get().recomputeCompletion(msg.teamId);
         break;
@@ -192,14 +202,12 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
       case "complete": {
         const teamProg = state.progress[msg.teamId];
         if (!teamProg) return;
-        const cur = teamProg[msg.challenge];
+        const next: TeamProgress = { ...teamProg };
+        const cur = ensureCell(next, msg.roundIndex);
         if (cur.completed) break;
-        const updated = {
-          ...teamProg,
-          [msg.challenge]: { ...cur, completed: true, completedAt: msg.ts },
-        };
+        next[msg.roundIndex] = { ...cur, completed: true, completedAt: msg.ts };
         set({
-          progress: { ...state.progress, [msg.teamId]: updated },
+          progress: { ...state.progress, [msg.teamId]: next },
         });
         get().recomputeCompletion(msg.teamId);
         break;
@@ -225,29 +233,20 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         if (!ev) return;
         // Wipe progress for the reset round and everything beyond, but
         // preserve earlier rounds so per-round place medals stay correct.
-        const enabled = CHALLENGE_ORDER.filter(
-          (id) => ev.challenges[id]?.enabled,
-        );
-        const order: ChallengeId[] = [...enabled].sort((a, b) => {
-          const oa =
-            ev.challenges[a]?.order ?? CHALLENGE_ORDER.indexOf(a);
-          const ob =
-            ev.challenges[b]?.order ?? CHALLENGE_ORDER.indexOf(b);
-          return oa - ob;
-        });
-        const toWipe = order.slice(msg.fromIndex);
+        const totalRounds = ev.rounds.length;
         const newProgress: Record<string, TeamProgress> = {};
         for (const tid of Object.keys(state.progress)) {
           const tp = state.progress[tid];
-          const cleaned: TeamProgress = { ...tp };
-          for (const id of toWipe) {
-            cleaned[id] = {
-              value: 0,
-              completed: false,
-              completedAt: null,
-              perPlayer: {},
-              guesses: [],
-            };
+          const cleaned: TeamProgress = {};
+          for (const key of Object.keys(tp)) {
+            const idx = Number(key);
+            if (Number.isFinite(idx) && idx < msg.fromIndex) {
+              cleaned[idx] = tp[idx];
+            }
+          }
+          // Drop anything past the clamp too (defense).
+          for (let i = msg.fromIndex; i < totalRounds; i++) {
+            delete cleaned[i];
           }
           newProgress[tid] = cleaned;
         }
@@ -274,21 +273,14 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
       case "round-start": {
         const ev = state.event;
         if (!ev) return;
-        // Wipe in-memory progress for this challenge across all teams so the
+        // Wipe in-memory progress for this round across all teams so the
         // round starts clean. Past round winners stay in event.roundWinners.
         const newProgress: Record<string, TeamProgress> = {};
         for (const tid of Object.keys(state.progress)) {
           const tp = state.progress[tid];
-          newProgress[tid] = {
-            ...tp,
-            [msg.challenge]: {
-              value: 0,
-              completed: false,
-              completedAt: null,
-              perPlayer: {},
-              guesses: [],
-            },
-          };
+          const cleaned: TeamProgress = { ...tp };
+          delete cleaned[msg.roundIndex];
+          newProgress[tid] = cleaned;
         }
         set({
           progress: newProgress,
@@ -374,12 +366,12 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
     if (!ev || !teamProg) return;
 
     const newProg: TeamProgress = { ...teamProg };
-    const enabledIds = CHALLENGE_ORDER.filter((id) => ev.challenges[id]?.enabled);
-    for (const id of enabledIds) {
-      const def = CHALLENGES[id];
-      const cur = newProg[id];
-      if (cur.completed) continue;
-      const threshold = ev.challenges[id]?.threshold ?? def.defaultThreshold;
+    for (let idx = 0; idx < ev.rounds.length; idx++) {
+      const round = ev.rounds[idx];
+      const def = CHALLENGES[round.challenge];
+      const cur = newProg[idx];
+      if (!cur || cur.completed) continue;
+      const threshold = round.threshold ?? def.defaultThreshold;
       let isDone = false;
 
       switch (def.aggregation) {
@@ -387,8 +379,9 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
           isDone = cur.value >= threshold;
           break;
         case "per-player": {
-          // Each teammate must hit threshold/3 (or threshold/playerCount). Sum still represented.
-          const teammates = Object.values(state.players).filter((p) => p.teamId === teamId);
+          const teammates = Object.values(state.players).filter(
+            (p) => p.teamId === teamId,
+          );
           const perPlayerThreshold = threshold / Math.max(1, teammates.length);
           isDone =
             teammates.length > 0 &&
@@ -396,10 +389,14 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
           break;
         }
         case "per-player-once": {
-          const teammates = Object.values(state.players).filter((p) => p.teamId === teamId);
+          const teammates = Object.values(state.players).filter(
+            (p) => p.teamId === teamId,
+          );
           isDone =
             teammates.length > 0 &&
-            teammates.every((p) => (cur.guesses ?? []).some((g) => g.playerId === p.id));
+            teammates.every((p) =>
+              (cur.guesses ?? []).some((g) => g.playerId === p.id),
+            );
           break;
         }
         case "all-simultaneous":
@@ -408,7 +405,11 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
       }
 
       if (isDone) {
-        newProg[id] = { ...cur, completed: true, completedAt: cur.completedAt ?? Date.now() };
+        newProg[idx] = {
+          ...cur,
+          completed: true,
+          completedAt: cur.completedAt ?? Date.now(),
+        };
       }
     }
 
@@ -426,8 +427,10 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
     const ev = s.event;
     const tp = s.progress[teamId];
     if (!ev || !tp) return false;
-    const enabled = CHALLENGE_ORDER.filter((id) => ev.challenges[id]?.enabled);
-    return enabled.every((id) => tp[id]?.completed);
+    for (let idx = 0; idx < ev.rounds.length; idx++) {
+      if (!tp[idx]?.completed) return false;
+    }
+    return ev.rounds.length > 0;
   },
 
   getMyTeamProgress: () => {
@@ -441,24 +444,20 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
     const newProgress: Record<string, TeamProgress> = { ...state.progress };
 
     for (const row of rows) {
-      const teamProg = newProgress[row.teamId] ?? emptyProgress();
-      const cur = teamProg[row.challenge];
-      if (!cur) continue;
+      const teamProg = { ...(newProgress[row.teamId] ?? emptyProgress()) };
+      const cur = teamProg[row.roundIndex] ?? emptyCell();
       // Per-cell MAX-merge: don't regress live updates that arrived before
       // the persisted snapshot loaded.
       const value = Math.max(cur.value, row.value);
       const completed = cur.completed || row.completed;
-      const completedAt =
-        cur.completedAt ?? row.completedAt ?? null;
-      newProgress[row.teamId] = {
-        ...teamProg,
-        [row.challenge]: {
-          ...cur,
-          value,
-          completed,
-          completedAt,
-        },
+      const completedAt = cur.completedAt ?? row.completedAt ?? null;
+      teamProg[row.roundIndex] = {
+        ...cur,
+        value,
+        completed,
+        completedAt,
       };
+      newProgress[row.teamId] = teamProg;
     }
 
     set({ progress: newProgress });

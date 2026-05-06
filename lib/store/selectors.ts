@@ -1,12 +1,12 @@
 "use client";
 import { useMemo } from "react";
 import { useToastyStore } from "./index";
-import { CHALLENGE_ORDER } from "@/lib/challenges";
 import type { Player, Team } from "@/lib/types";
 
 /**
- * Memoized standings: ordered list of teams by completion + tiebreaker (north error sum).
- * Recomputes only when teams / progress / event change.
+ * Memoized standings: ordered list of teams by completed-round count, with
+ * a north-error tiebreaker when one of the rounds was Due North. Recomputes
+ * only when teams / progress / event change.
  */
 export interface Standing {
   team: Team;
@@ -21,12 +21,22 @@ export function useStandings(): Standing[] {
 
   return useMemo(() => {
     if (!event) return [];
-    const enabled = CHALLENGE_ORDER.filter((id) => event.challenges[id]?.enabled);
+    const rounds = event.rounds;
     return Object.values(teams)
       .map((team) => {
         const tp = progress[team.id];
-        const completedCount = tp ? enabled.filter((id) => tp[id]?.completed).length : 0;
-        const northErrSum = tp?.north?.guesses?.reduce((sum, g) => sum + g.errorDeg, 0) ?? 0;
+        let completedCount = 0;
+        let northErrSum = 0;
+        for (let idx = 0; idx < rounds.length; idx++) {
+          const cell = tp?.[idx];
+          if (cell?.completed) completedCount += 1;
+          if (rounds[idx].challenge === "north") {
+            northErrSum += (cell?.guesses ?? []).reduce(
+              (s, g) => s + g.errorDeg,
+              0,
+            );
+          }
+        }
         return { team, completedCount, northErrSum };
       })
       .sort((a, b) => {

@@ -12,16 +12,16 @@ import {
   type FinalProgressRow,
 } from "./schema";
 import {
-  CHALLENGE_ORDER,
   CHALLENGES,
-  defaultChallengeConfig,
-  enabledChallengeOrder,
+  coerceRounds,
+  defaultRounds,
 } from "@/lib/challenges";
 import type {
   ChallengeId,
   EventConfig,
   EventStatus,
   Player,
+  RoundConfig,
   RoundStatus,
   RoundWinnerEntry,
   Team,
@@ -51,24 +51,9 @@ const TEAM_PRESET_POOL: Array<{ name: string; emoji: string; color: string }> =
 // ----- Row → DTO mappers -----
 
 export function eventRowToConfig(row: EventRow): EventConfig {
-  // Backfill any new challenge ids that didn't exist when this event was
-  // created. Keeps old events working as we add new challenges (e.g.,
-  // 'time-guess' was added later).
-  const stored = (row.challenges ?? {}) as Partial<EventConfig["challenges"]>;
-  const merged: EventConfig["challenges"] = {} as EventConfig["challenges"];
-  let nextOrder = CHALLENGE_ORDER.length;
-  for (const id of CHALLENGE_ORDER) {
-    const cur = stored[id];
-    if (cur) {
-      merged[id] = cur;
-    } else {
-      merged[id] = {
-        enabled: false,
-        threshold: CHALLENGES[id].defaultThreshold,
-        order: nextOrder++,
-      };
-    }
-  }
+  // The `challenges` jsonb column may hold either the new RoundConfig[] shape
+  // or the legacy ChallengeId-keyed record. coerceRounds normalizes both.
+  const rounds = coerceRounds(row.challenges);
 
   return {
     id: row.id,
@@ -76,7 +61,7 @@ export function eventRowToConfig(row: EventRow): EventConfig {
     title: row.title,
     groomName: row.groomName,
     status: row.status as EventStatus,
-    challenges: merged,
+    rounds,
     createdAt: row.createdAt.toISOString(),
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
@@ -159,7 +144,7 @@ export async function createEvent(input: {
 }): Promise<{ event: EventConfig; teams: Team[] }> {
   const title = input.title?.trim() || "Bachelor Party";
   const groomName = input.groomName?.trim() || "";
-  const challenges = defaultChallengeConfig();
+  const rounds = defaultRounds();
 
   // Try up to 5 times to avoid rare code collisions.
   let lastErr: unknown = null;
@@ -172,7 +157,7 @@ export async function createEvent(input: {
           code,
           title,
           groomName,
-          challenges,
+          challenges: rounds,
         })
         .returning();
       const eventRow = inserted[0];
@@ -221,7 +206,7 @@ export async function updateEvent(
   patch: {
     title?: string;
     groomName?: string;
-    challenges?: EventConfig["challenges"];
+    rounds?: RoundConfig[];
     teams?: Array<{ id: string; name?: string; emoji?: string; color?: string }>;
   },
 ): Promise<{ event: EventConfig; teams: Team[] } | null> {
@@ -236,7 +221,7 @@ export async function updateEvent(
   const updates: Partial<typeof events.$inferInsert> = {};
   if (typeof patch.title === "string") updates.title = patch.title;
   if (typeof patch.groomName === "string") updates.groomName = patch.groomName;
-  if (patch.challenges) updates.challenges = patch.challenges;
+  if (patch.rounds) updates.challenges = patch.rounds;
 
   let updatedEventRow: EventRow = existing;
   if (Object.keys(updates).length > 0) {
@@ -557,31 +542,34 @@ export async function resetEventToLobby(code: string): Promise<{
 export async function upsertProgressSnapshot(input: {
   eventId: string;
   teamId: string;
-  challenges: Array<{
+  rounds: Array<{
+    roundIndex: number;
     challenge: ChallengeId;
     value: number;
     completed: boolean;
     completedAt: number | null;
   }>;
 }): Promise<void> {
-  if (input.challenges.length === 0) return;
-  for (const c of input.challenges) {
+  if (input.rounds.length === 0) return;
+  for (const c of input.rounds) {
     // completed_at is set by the SERVER (NOW()) on the first transition to
     // completed=true so cross-device clock skew can't flip the winner-pick.
     // Once set, COALESCE keeps it stable for subsequent flushes from the
     // same team. Clients still send completedAt for debugging but we ignore
     // it for ordering.
     await db.execute(sql`
-      INSERT INTO final_progress (event_id, team_id, challenge, value, completed, completed_at)
+      INSERT INTO final_progress (event_id, team_id, round_index, challenge, value, completed, completed_at)
       VALUES (
         ${input.eventId},
         ${input.teamId},
+        ${c.roundIndex},
         ${c.challenge},
         ${String(c.value)},
         ${c.completed},
         CASE WHEN ${c.completed} THEN NOW() ELSE NULL END
       )
-      ON CONFLICT (event_id, team_id, challenge) DO UPDATE SET
+      ON CONFLICT (event_id, team_id, round_index) DO UPDATE SET
+        challenge = EXCLUDED.challenge,
         value = GREATEST(final_progress.value, EXCLUDED.value),
         completed = final_progress.completed OR EXCLUDED.completed,
         completed_at = COALESCE(
@@ -598,6 +586,7 @@ export async function upsertProgressSnapshot(input: {
  */
 export async function getEventProgress(code: string): Promise<Array<{
   teamId: string;
+  roundIndex: number;
   challenge: ChallengeId;
   value: number;
   completed: boolean;
@@ -618,6 +607,7 @@ export async function getEventProgress(code: string): Promise<Array<{
 
   return rows.map((r) => ({
     teamId: r.teamId,
+    roundIndex: r.roundIndex,
     challenge: r.challenge as ChallengeId,
     value: Number(r.value),
     completed: r.completed,
@@ -630,6 +620,7 @@ export async function tryFinishEvent(input: {
   teamId: string;
   finalProgress: Array<{
     teamId: string;
+    roundIndex: number;
     challenge: ChallengeId;
     value: number;
     completed: boolean;
@@ -664,16 +655,18 @@ export async function tryFinishEvent(input: {
       // value and the earliest completion timestamp.
       for (const p of input.finalProgress) {
         await db.execute(sql`
-          INSERT INTO final_progress (event_id, team_id, challenge, value, completed, completed_at)
+          INSERT INTO final_progress (event_id, team_id, round_index, challenge, value, completed, completed_at)
           VALUES (
             ${eventRow.id},
             ${p.teamId},
+            ${p.roundIndex},
             ${p.challenge},
             ${String(p.value)},
             ${p.completed},
             CASE WHEN ${p.completed} THEN NOW() ELSE NULL END
           )
-          ON CONFLICT (event_id, team_id, challenge) DO UPDATE SET
+          ON CONFLICT (event_id, team_id, round_index) DO UPDATE SET
+            challenge = EXCLUDED.challenge,
             value = GREATEST(final_progress.value, EXCLUDED.value),
             completed = final_progress.completed OR EXCLUDED.completed,
             completed_at = COALESCE(
@@ -717,6 +710,7 @@ export async function getResults(code: string): Promise<{
   players: Player[];
   finalProgress: Array<{
     teamId: string;
+    roundIndex: number;
     challenge: ChallengeId;
     value: number;
     completed: boolean;
@@ -746,6 +740,7 @@ export async function getResults(code: string): Promise<{
     players: playerRows.map(playerRowToPlayer),
     finalProgress: fpRows.map((r: FinalProgressRow) => ({
       teamId: r.teamId,
+      roundIndex: r.roundIndex,
       challenge: r.challenge as ChallengeId,
       value: Number(r.value),
       completed: r.completed,
@@ -795,9 +790,10 @@ const COUNTDOWN_MS = 5000;
 
 /**
  * Wipe a specific round (and everything after it) without starting it.
- * Trims roundWinners, deletes final_progress for that challenge and all
- * later challenges, clears any live round state. Caller (host) then taps
- * "START ROUND N" to actually begin the round again.
+ * Trims roundWinners, deletes final_progress for round_index >= input
+ * (so any duplicate-challenge rounds later in the list are also cleared),
+ * clears any live round state. Caller (host) then taps "START ROUND N"
+ * to actually begin the round again.
  */
 export async function resetRound(input: {
   code: string;
@@ -814,26 +810,22 @@ export async function resetRound(input: {
   const eventRow = eventRows[0];
   if (!eventRow) return { error: "not-found" };
 
-  const challengesCfg = eventRow.challenges as EventConfig["challenges"];
-  const order = enabledChallengeOrder(challengesCfg);
+  const rounds = coerceRounds(eventRow.challenges);
   if (
     input.roundIndex < 0 ||
-    input.roundIndex >= order.length
+    input.roundIndex >= rounds.length
   ) {
     return { error: "invalid-index" };
   }
 
   const winners = (eventRow.roundWinners as RoundWinnerEntry[]) ?? [];
   const trimmedWinners = winners.slice(0, input.roundIndex);
-  const challengesToWipe = order.slice(input.roundIndex);
 
-  if (challengesToWipe.length > 0) {
-    await db.execute(sql`
-      DELETE FROM final_progress
-      WHERE event_id = ${eventRow.id}
-      AND challenge = ANY(${challengesToWipe})
-    `);
-  }
+  await db.execute(sql`
+    DELETE FROM final_progress
+    WHERE event_id = ${eventRow.id}
+    AND round_index >= ${input.roundIndex}
+  `);
 
   const updated = await db
     .update(events)
@@ -861,9 +853,9 @@ export async function resetRound(input: {
  * that doesn't yet have a winner in `round_winners`. If all rounds are
  * decided, returns `{ error: 'all-decided' }`.
  *
- * Redo path (`redo: true, roundIndex`): wipes final_progress for that round's
- * challenge (and all later ones), splices `round_winners` from index
- * `roundIndex` onward, then starts that round.
+ * Redo path (`redo: true, roundIndex`): wipes final_progress for that round
+ * and all later ones, splices `round_winners` from index `roundIndex` onward,
+ * then starts that round.
  *
  * On success: sets currentRoundIndex/Status/StartsAt and ensures status='active'.
  */
@@ -888,8 +880,7 @@ export async function startRound(input: {
   const eventRow = eventRows[0];
   if (!eventRow) return { error: "not-found" };
 
-  const challengesCfg = eventRow.challenges as EventConfig["challenges"];
-  const order = enabledChallengeOrder(challengesCfg);
+  const rounds = coerceRounds(eventRow.challenges);
   const winners = (eventRow.roundWinners as RoundWinnerEntry[]) ?? [];
 
   let targetIndex: number;
@@ -899,21 +890,18 @@ export async function startRound(input: {
     if (
       typeof input.roundIndex !== "number" ||
       input.roundIndex < 0 ||
-      input.roundIndex >= order.length
+      input.roundIndex >= rounds.length
     ) {
       return { error: "invalid-index" };
     }
     targetIndex = input.roundIndex;
 
     const trimmedWinners = winners.slice(0, targetIndex);
-    const challengesToWipe = order.slice(targetIndex);
-    if (challengesToWipe.length > 0) {
-      await db.execute(sql`
-        DELETE FROM final_progress
-        WHERE event_id = ${eventRow.id}
-        AND challenge = ANY(${challengesToWipe})
-      `);
-    }
+    await db.execute(sql`
+      DELETE FROM final_progress
+      WHERE event_id = ${eventRow.id}
+      AND round_index >= ${targetIndex}
+    `);
 
     await db
       .update(events)
@@ -926,10 +914,10 @@ export async function startRound(input: {
       return { error: "round-live" };
     }
     targetIndex = winners.length;
-    if (targetIndex >= order.length) return { error: "all-decided" };
+    if (targetIndex >= rounds.length) return { error: "all-decided" };
   }
 
-  const challenge = order[targetIndex];
+  const challenge = rounds[targetIndex].challenge;
   const startsAt = new Date(Date.now() + COUNTDOWN_MS);
 
   const updated = await db
@@ -956,16 +944,15 @@ export async function startRound(input: {
 /**
  * Atomically end the currently-live round and append a winner.
  *
- * `mode === 'auto'`: caller claims a team has just completed the threshold.
- * Server validates by reading `final_progress` for the current challenge —
+ * `mode === 'auto'`: caller claims a team has just completed the round.
+ * Server validates by reading `final_progress` for the current round_index —
  * only honored if that team's row is `completed=true`.
  *
  * `mode === 'host'`: no auto-validation. If `requestedTeamId` is omitted,
  * server picks per the rules in the spec.
  *
  * First-write-wins via predicate update: only flips status from 'live' to
- * 'decided' when index is unchanged. If this was the last enabled round,
- * also sets event status to 'finished' and computes overall winnerTeamId.
+ * 'decided' when index is unchanged.
  */
 export async function endRound(input: {
   code: string;
@@ -996,11 +983,10 @@ export async function endRound(input: {
     return { error: "no-live-round" };
   }
 
-  const challengesCfg = eventRow.challenges as EventConfig["challenges"];
-  const order = enabledChallengeOrder(challengesCfg);
+  const rounds = coerceRounds(eventRow.challenges);
   const idx = eventRow.currentRoundIndex;
-  if (idx < 0 || idx >= order.length) return { error: "no-live-round" };
-  const challenge = order[idx];
+  if (idx < 0 || idx >= rounds.length) return { error: "no-live-round" };
+  const challenge = rounds[idx].challenge;
 
   const fpRows = await db
     .select()
@@ -1014,7 +1000,7 @@ export async function endRound(input: {
     const claim = fpRows.find(
       (r) =>
         r.teamId === input.requestedTeamId &&
-        r.challenge === challenge &&
+        r.roundIndex === idx &&
         r.completed,
     );
     if (!claim) return { error: "not-completed" };
@@ -1029,12 +1015,12 @@ export async function endRound(input: {
         .where(eq(teams.eventId, eventRow.id));
       if (teamRows.length === 0) return { error: "no-teams" };
 
-      // Universal rule: if any team has finished the challenge, the earliest
-      // finisher wins. Auto-end is no longer triggered by clients, so multiple
-      // teams may have finished by the time the host clicks End Round — pick
-      // the one who got there first.
+      // Universal rule: if any team has finished this round, the earliest
+      // finisher wins. Auto-end is no longer triggered by clients, so
+      // multiple teams may have finished by the time the host clicks End
+      // Round — pick the one who got there first.
       const completedRows = fpRows
-        .filter((r) => r.challenge === challenge && r.completed)
+        .filter((r) => r.roundIndex === idx && r.completed)
         .sort((a, b) => {
           const at = a.completedAt?.getTime() ?? Infinity;
           const bt = b.completedAt?.getTime() ?? Infinity;
@@ -1050,9 +1036,9 @@ export async function endRound(input: {
         challenge === "spin"
       ) {
         // Accumulators: no team finished — highest progress wins.
-        const challengeRows = fpRows.filter((r) => r.challenge === challenge);
+        const roundRows = fpRows.filter((r) => r.roundIndex === idx);
         let best: { teamId: string; value: number } | null = null;
-        for (const r of challengeRows) {
+        for (const r of roundRows) {
           const v = Number(r.value);
           if (!best || v > best.value) best = { teamId: r.teamId, value: v };
         }
@@ -1077,9 +1063,7 @@ export async function endRound(input: {
   const trimmed = existingWinners.slice(0, idx);
   const nextWinners = [...trimmed, newWinnerEntry];
 
-  const isLastRound = idx + 1 >= order.length;
-
-  // Note: previously the last round auto-finished the event. We now stay in
+  // Note: the last round previously auto-finished the event. We now stay in
   // 'active' status with all rounds decided, and rely on a host RELEASE
   // (POST /api/events/:code/end) to flip status='finished'. Keeps players
   // locked into the "waiting on host" screen until then.

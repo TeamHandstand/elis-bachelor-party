@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -16,9 +16,17 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { ChallengeId, EventConfig } from "@/lib/types";
+import type {
+  ChallengeId,
+  EventConfig,
+  RoundConfig,
+} from "@/lib/types";
 import type { UpdateEventRequest } from "@/lib/api/contract";
-import { CHALLENGES, fullChallengeOrder } from "@/lib/challenges";
+import {
+  CHALLENGE_ORDER,
+  CHALLENGES,
+  challengeHasThreshold,
+} from "@/lib/challenges";
 import { patchEvent } from "./_fetch";
 
 interface Props {
@@ -28,10 +36,27 @@ interface Props {
 
 const SAVE_DEBOUNCE_MS = 500;
 
+// Stable per-row keys so dnd-kit can track items even though challenge ids
+// repeat. We assign one fresh id per round on mount and keep it across edits.
+type RowId = string;
+type Row = { id: RowId; round: RoundConfig };
+
+function newRowId(): RowId {
+  return `r_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function roundsToRows(rounds: RoundConfig[]): Row[] {
+  return rounds.map((r) => ({ id: newRowId(), round: { ...r } }));
+}
+
+function rowsToRounds(rows: Row[]): RoundConfig[] {
+  return rows.map((r) => ({ ...r.round }));
+}
+
 export default function EventConfigPanel({ event, onSaved }: Props) {
   const [title, setTitle] = useState(event.title);
   const [groomName, setGroomName] = useState(event.groomName);
-  const [challenges, setChallenges] = useState(event.challenges);
+  const [rows, setRows] = useState<Row[]>(() => roundsToRows(event.rounds));
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +67,7 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
       lastEventId.current = event.id;
       setTitle(event.title);
       setGroomName(event.groomName);
-      setChallenges(event.challenges);
+      setRows(roundsToRows(event.rounds));
     }
   }, [event]);
 
@@ -85,19 +110,30 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
     setGroomName(v);
     scheduleSave({ groomName: v });
   }
-  function updateChallenge(
-    id: ChallengeId,
-    patch: Partial<{ enabled: boolean; threshold: number }>,
-  ) {
-    const next: EventConfig["challenges"] = {
-      ...challenges,
-      [id]: { ...challenges[id], ...patch },
-    };
-    setChallenges(next);
-    scheduleSave({ challenges: next });
+
+  function applyRows(next: Row[]) {
+    setRows(next);
+    scheduleSave({ rounds: rowsToRounds(next) });
   }
 
-  const ordered = fullChallengeOrder(challenges);
+  function updateRow(id: RowId, patch: Partial<RoundConfig>) {
+    const next = rows.map((r) =>
+      r.id === id ? { ...r, round: { ...r.round, ...patch } } : r,
+    );
+    applyRows(next);
+  }
+
+  function removeRow(id: RowId) {
+    applyRows(rows.filter((r) => r.id !== id));
+  }
+
+  function addRound(challenge: ChallengeId) {
+    const def = CHALLENGES[challenge];
+    applyRows([
+      ...rows,
+      { id: newRowId(), round: { challenge, threshold: def.defaultThreshold } },
+    ]);
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -105,18 +141,15 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
   );
 
   function onDragEnd(e: DragEndEvent) {
-    if (!e.over || e.active.id === e.over.id) return;
-    const oldIndex = ordered.indexOf(e.active.id as ChallengeId);
-    const newIndex = ordered.indexOf(e.over.id as ChallengeId);
+    const overId = e.over?.id;
+    if (overId === undefined || e.active.id === overId) return;
+    const oldIndex = rows.findIndex((r) => r.id === e.active.id);
+    const newIndex = rows.findIndex((r) => r.id === overId);
     if (oldIndex < 0 || newIndex < 0) return;
-    const newOrder = arrayMove(ordered, oldIndex, newIndex);
-    const next: EventConfig["challenges"] = { ...challenges };
-    newOrder.forEach((id, idx) => {
-      next[id] = { ...next[id], order: idx };
-    });
-    setChallenges(next);
-    scheduleSave({ challenges: next });
+    applyRows(arrayMove(rows, oldIndex, newIndex));
   }
+
+  const items = rows.map((r) => r.id);
 
   return (
     <section className="space-y-6">
@@ -154,9 +187,9 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
 
       <div className="bg-bg-card rounded-xl2 p-5 space-y-3">
         <div className="flex items-baseline justify-between flex-wrap gap-2">
-          <h2 className="font-display text-xl font-bold">🎯 Challenges</h2>
+          <h2 className="font-display text-xl font-bold">🎯 Rounds</h2>
           <span className="text-xs opacity-50">
-            Drag to reorder · toggle to disable · tune thresholds
+            Drag to reorder · add multiple of the same challenge with different thresholds
           </span>
         </div>
 
@@ -165,48 +198,47 @@ export default function EventConfigPanel({ event, onSaved }: Props) {
           collisionDetection={closestCenter}
           onDragEnd={onDragEnd}
         >
-          <SortableContext items={ordered} strategy={verticalListSortingStrategy}>
+          <SortableContext items={items} strategy={verticalListSortingStrategy}>
             <div className="divide-y divide-white/5">
-              {ordered.map((id, idx) => (
-                <SortableChallengeRow
-                  key={id}
-                  id={id}
+              {rows.length === 0 ? (
+                <div className="py-6 text-center text-sm opacity-60">
+                  No rounds yet. Add one below ↓
+                </div>
+              ) : null}
+              {rows.map((row, idx) => (
+                <SortableRoundRow
+                  key={row.id}
+                  rowId={row.id}
                   ordinal={idx + 1}
-                  enabled={challenges[id]?.enabled ?? false}
-                  threshold={
-                    challenges[id]?.threshold ??
-                    CHALLENGES[id].defaultThreshold
-                  }
-                  onToggle={(checked) =>
-                    updateChallenge(id, { enabled: checked })
-                  }
-                  onThreshold={(t) => updateChallenge(id, { threshold: t })}
+                  round={row.round}
+                  onChange={(patch) => updateRow(row.id, patch)}
+                  onRemove={() => removeRow(row.id)}
                 />
               ))}
             </div>
           </SortableContext>
         </DndContext>
+
+        <AddRoundBar onAdd={addRound} />
       </div>
     </section>
   );
 }
 
-function SortableChallengeRow({
-  id,
+function SortableRoundRow({
+  rowId,
   ordinal,
-  enabled,
-  threshold,
-  onToggle,
-  onThreshold,
+  round,
+  onChange,
+  onRemove,
 }: {
-  id: ChallengeId;
+  rowId: string;
   ordinal: number;
-  enabled: boolean;
-  threshold: number;
-  onToggle: (checked: boolean) => void;
-  onThreshold: (n: number) => void;
+  round: RoundConfig;
+  onChange: (patch: Partial<RoundConfig>) => void;
+  onRemove: () => void;
 }) {
-  const def = CHALLENGES[id];
+  const def = CHALLENGES[round.challenge];
   const {
     attributes,
     listeners,
@@ -214,13 +246,16 @@ function SortableChallengeRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id: rowId });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.6 : 1,
   };
+
+  const showThreshold = challengeHasThreshold(round.challenge);
+  const selectId = useId();
 
   return (
     <div
@@ -240,48 +275,96 @@ function SortableChallengeRow({
       <div className="font-display font-extrabold text-lg opacity-60 w-6 text-center tabular-nums">
         {ordinal}
       </div>
-      <label className="flex items-center gap-3 flex-1 min-w-[180px] cursor-pointer">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => onToggle(e.target.checked)}
-          className="size-5 accent-accent-pink"
-        />
-        <span className="text-2xl">{def.emoji}</span>
-        <div className="leading-tight">
-          <div className="font-bold">{def.label}</div>
-          <div className="text-xs opacity-60">{def.description}</div>
-        </div>
-      </label>
+      <span className="text-2xl">{def.emoji}</span>
+      <div className="flex flex-col gap-1 flex-1 min-w-[180px]">
+        <label htmlFor={selectId} className="sr-only">
+          Challenge type
+        </label>
+        <select
+          id={selectId}
+          value={round.challenge}
+          onChange={(e) =>
+            onChange({ challenge: e.target.value as ChallengeId })
+          }
+          className="rounded-lg bg-bg-deep border border-white/10 px-3 py-2 outline-none focus:border-accent-pink font-bold"
+        >
+          {CHALLENGE_ORDER.map((id) => (
+            <option key={id} value={id}>
+              {CHALLENGES[id].emoji} {CHALLENGES[id].label}
+            </option>
+          ))}
+        </select>
+        <div className="text-xs opacity-60">{def.description}</div>
+      </div>
       <div className="flex items-center gap-2">
-        {id === "time-guess" ? (
-          <>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={Math.round(threshold / 1000)}
-              onChange={(e) =>
-                onThreshold((Number(e.target.value) || 0) * 1000)
-              }
-              disabled={!enabled}
-              className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink disabled:opacity-40"
-            />
-            <span className="text-xs opacity-60 w-20">seconds</span>
-          </>
+        {showThreshold ? (
+          round.challenge === "time-guess" ? (
+            <>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={Math.round(round.threshold / 1000)}
+                onChange={(e) =>
+                  onChange({ threshold: (Number(e.target.value) || 0) * 1000 })
+                }
+                className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink"
+              />
+              <span className="text-xs opacity-60 w-20">seconds</span>
+            </>
+          ) : (
+            <>
+              <input
+                type="number"
+                min={1}
+                value={round.threshold}
+                onChange={(e) =>
+                  onChange({ threshold: Number(e.target.value) || 0 })
+                }
+                className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink"
+              />
+              <span className="text-xs opacity-60 w-20">{def.unit}</span>
+            </>
+          )
         ) : (
-          <>
-            <input
-              type="number"
-              min={1}
-              value={threshold}
-              onChange={(e) => onThreshold(Number(e.target.value) || 0)}
-              disabled={!enabled}
-              className="w-28 rounded-lg bg-bg-deep border border-white/10 px-3 py-2 text-right outline-none focus:border-accent-pink disabled:opacity-40"
-            />
-            <span className="text-xs opacity-60 w-20">{def.unit}</span>
-          </>
+          <div className="text-xs opacity-60 w-48 text-right">
+            one guess per teammate · smallest avg wins
+          </div>
         )}
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove round"
+        className="px-3 py-2 rounded-lg bg-bg-deep border border-white/10 text-sm font-bold opacity-70 hover:opacity-100 hover:text-accent-pink"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+function AddRoundBar({ onAdd }: { onAdd: (id: ChallengeId) => void }) {
+  return (
+    <div className="pt-3 border-t border-white/5">
+      <div className="text-[11px] uppercase tracking-widest opacity-60 mb-2 font-bold">
+        ➕ add a round
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {CHALLENGE_ORDER.map((id) => {
+          const def = CHALLENGES[id];
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onAdd(id)}
+              className="px-3 py-2 rounded-xl bg-bg-deep border border-white/10 hover:border-accent-pink text-sm font-bold flex items-center gap-2"
+            >
+              <span className="text-base">{def.emoji}</span>
+              <span>{def.label}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

@@ -31,11 +31,16 @@ export interface ChallengeDef {
 }
 
 // ----- Real-time message types (PubNub channel `event-<code>`) -----
+//
+// All progress / live / guess / complete messages now carry `roundIndex`
+// so the store can route updates to the correct round even when the same
+// challenge type appears in more than one round of the same event.
 
 export interface ProgressDeltaMsg {
   kind: "progress";
   playerId: string;
   teamId: string;
+  roundIndex: number;
   challenge: Exclude<ChallengeId, "scream" | "shake" | "north">;
   delta: number;
   ts: number;
@@ -45,6 +50,7 @@ export interface LiveLevelMsg {
   kind: "live";
   playerId: string;
   teamId: string;
+  roundIndex: number;
   challenge: "scream" | "shake";
   level: number; // dB or accel magnitude
   ts: number;
@@ -54,6 +60,7 @@ export interface NorthGuessMsg {
   kind: "guess";
   playerId: string;
   teamId: string;
+  roundIndex: number;
   // Reused for both north (degrees off) and time-guess (ms deviation).
   challenge: "north" | "time-guess";
   errorDeg: number;
@@ -63,6 +70,7 @@ export interface NorthGuessMsg {
 export interface CompleteMsg {
   kind: "complete";
   teamId: string;
+  roundIndex: number;
   challenge: ChallengeId;
   ts: number;
 }
@@ -163,16 +171,22 @@ export interface RoundWinnerEntry {
 
 export type RoundStatus = "live" | "decided";
 
+// One slot in the event's round list. The host can drag-drop these around
+// and add multiple of the same challenge type with different thresholds.
+export interface RoundConfig {
+  challenge: ChallengeId;
+  threshold: number;
+}
+
 export interface EventConfig {
   id: string;
   code: string;
   title: string;
   groomName: string;
   status: EventStatus;
-  challenges: Record<
-    ChallengeId,
-    { enabled: boolean; threshold: number; order?: number }
-  >;
+  // Ordered list of rounds. Index in this array IS the round index used
+  // throughout PubNub messages, progress storage, and host UI.
+  rounds: RoundConfig[];
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -208,8 +222,10 @@ export interface ChallengeProgress {
   completedAt: number | null;
   // For per-player aggregation, contributions per player
   perPlayer?: Record<string, number>;
-  // For 'north', list of guesses
+  // For 'north' / 'time-guess', list of guesses
   guesses?: Array<{ playerId: string; errorDeg: number }>;
 }
 
-export type TeamProgress = Record<ChallengeId, ChallengeProgress>;
+// Keyed by round index (number). Rounds that haven't been touched yet
+// simply don't have an entry; the store / UI default to a blank cell.
+export type TeamProgress = Record<number, ChallengeProgress>;

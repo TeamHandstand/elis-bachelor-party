@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useToastyStore } from "@/lib/store";
 import { useStandings } from "@/lib/store/selectors";
-import { CHALLENGE_ORDER } from "@/lib/challenges";
 import { RenameModal } from "./RenameModal";
 
 const PLACE_LABELS = ["1st", "2nd", "3rd", "4th", "5th"];
@@ -55,10 +54,13 @@ export function TeamHeader() {
   const placeIdx = standings.findIndex((s) => s.team.id === team.id);
   const place =
     placeIdx >= 0 ? PLACE_LABELS[placeIdx] ?? `${placeIdx + 1}th` : "—";
-  const enabled = CHALLENGE_ORDER.filter((id) => event.challenges[id]?.enabled);
-  const doneCount = myProgress
-    ? enabled.filter((id) => myProgress[id]?.completed).length
-    : 0;
+  const totalRounds = event.rounds.length;
+  let doneCount = 0;
+  if (myProgress) {
+    for (let i = 0; i < totalRounds; i++) {
+      if (myProgress[i]?.completed) doneCount += 1;
+    }
+  }
 
   async function handleRename({
     name,
@@ -110,7 +112,7 @@ export function TeamHeader() {
           <span className="ml-2 text-sm opacity-80 align-middle">✎</span>
         </div>
         <div className="text-xs uppercase tracking-widest opacity-95 mt-1 font-bold">
-          {place} place · {doneCount} of {enabled.length} done
+          {place} place · {doneCount} of {totalRounds} done
         </div>
       </button>
 

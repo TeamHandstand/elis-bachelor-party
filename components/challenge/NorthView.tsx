@@ -8,6 +8,7 @@ import { usePublisher } from "@/lib/store/bootstrap";
 interface Props {
   code: string;
   myPlayerId: string;
+  roundIndex: number;
 }
 
 const TICK_COUNT = 24;
@@ -63,7 +64,7 @@ function angularError(heading: number): number {
   return Math.abs(d);
 }
 
-export function NorthView({ code, myPlayerId }: Props) {
+export function NorthView({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
@@ -75,7 +76,7 @@ export function NorthView({ code, myPlayerId }: Props) {
   const [submittedLocally, setSubmittedLocally] = useState(false);
   const liveListenerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(null);
 
-  const guesses = myProgress?.north.guesses ?? [];
+  const guesses = myProgress?.[roundIndex]?.guesses ?? [];
   const myGuess = guesses.find((g) => g.playerId === myPlayerId);
   const iGuessed = !!myGuess || submittedLocally;
   const allGuessed =
@@ -144,6 +145,7 @@ export function NorthView({ code, myPlayerId }: Props) {
       kind: "guess",
       playerId: myPlayerId,
       teamId: myTeamId,
+      roundIndex,
       challenge: "north",
       errorDeg: err,
       ts: Date.now(),

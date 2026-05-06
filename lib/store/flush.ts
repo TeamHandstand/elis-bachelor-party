@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { useToastyStore } from "@/lib/store";
-import { CHALLENGE_ORDER } from "@/lib/challenges";
 import type { ChallengeId } from "@/lib/types";
 import type { ProgressSnapshotRequest } from "@/lib/api/contract";
 
 const FLUSH_INTERVAL_MS = 2000;
 
 interface CellSnapshot {
+  roundIndex: number;
   challenge: ChallengeId;
   value: number;
   completed: boolean;
@@ -18,7 +18,8 @@ function snapshotEqual(a: CellSnapshot, b: CellSnapshot): boolean {
   return (
     a.value === b.value &&
     a.completed === b.completed &&
-    a.completedAt === b.completedAt
+    a.completedAt === b.completedAt &&
+    a.challenge === b.challenge
   );
 }
 
@@ -34,7 +35,7 @@ function snapshotEqual(a: CellSnapshot, b: CellSnapshot): boolean {
  * stops firing in that state.
  */
 export function useProgressFlush(code: string): void {
-  const lastSentRef = useRef<Record<ChallengeId, CellSnapshot> | null>(null);
+  const lastSentRef = useRef<Record<number, CellSnapshot> | null>(null);
   const inFlightRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -53,16 +54,17 @@ export function useProgressFlush(code: string): void {
       if (!teamProg) return null;
 
       const changed: CellSnapshot[] = [];
-      for (const id of CHALLENGE_ORDER) {
-        const cur = teamProg[id];
+      for (let idx = 0; idx < event.rounds.length; idx++) {
+        const cur = teamProg[idx];
         if (!cur) continue;
         const cell: CellSnapshot = {
-          challenge: id,
+          roundIndex: idx,
+          challenge: event.rounds[idx].challenge,
           value: cur.value,
           completed: cur.completed,
           completedAt: cur.completedAt,
         };
-        const last = lastSentRef.current?.[id];
+        const last = lastSentRef.current?.[idx];
         if (!last || !snapshotEqual(last, cell)) {
           changed.push(cell);
         }
@@ -78,7 +80,7 @@ export function useProgressFlush(code: string): void {
       try {
         const body: ProgressSnapshotRequest = {
           teamId: snap.teamId,
-          challenges: snap.changed,
+          rounds: snap.changed,
         };
         const res = await fetch(`/api/events/${code}/progress`, {
           method: "POST",
@@ -92,13 +94,13 @@ export function useProgressFlush(code: string): void {
         // Best-effort parse — we don't actually use the body.
         await res.json().catch(() => undefined);
         // Mark these cells as last-sent.
-        const next: Record<string, CellSnapshot> = {
+        const next: Record<number, CellSnapshot> = {
           ...(lastSentRef.current ?? {}),
         };
         for (const c of snap.changed) {
-          next[c.challenge] = c;
+          next[c.roundIndex] = c;
         }
-        lastSentRef.current = next as Record<ChallengeId, CellSnapshot>;
+        lastSentRef.current = next;
       } catch {
         // network blip — try again next tick
       } finally {

@@ -7,7 +7,6 @@ import {
   useRoundStandings,
   useRoundWinnerByIndex,
 } from "@/lib/store/selectors";
-import { enabledChallengeOrder } from "@/lib/challenges";
 import { TeamHeader } from "@/components/dashboard/TeamHeader";
 import { TeammateOrbit } from "@/components/dashboard/TeammateOrbit";
 import { RoundCard, type RoundCardState } from "./RoundCard";
@@ -27,7 +26,6 @@ import { Confetti } from "./Confetti";
 import { ChampionBanner } from "./ChampionBanner";
 import { RoundBreakdown, type BreakdownEntry } from "./RoundBreakdown";
 import { useCookieHost } from "@/lib/auth/use-cookie-host";
-import type { ChallengeId } from "@/lib/types";
 
 interface Props {
   code: string;
@@ -57,21 +55,20 @@ export function JourneyView({ code, myPlayerId }: Props) {
   const playersMap = useToastyStore((s) => s.players);
 
   // Build the rich entry list for the End Round picker — completion times,
-  // current values, and rosters per team for the active challenge.
+  // current values, and rosters per team for the active round.
   const endPickerEntries = useMemo<EndPickerEntry[]>(() => {
     if (!event || event.currentRoundIndex === null) return [];
-    const order = enabledChallengeOrder(event.challenges);
-    const ch = order[event.currentRoundIndex];
-    if (!ch) return [];
-    const def = CHALLENGES[ch];
-    const threshold = event.challenges[ch]?.threshold ?? def.defaultThreshold;
+    const round = event.rounds[event.currentRoundIndex];
+    if (!round) return [];
+    const def = CHALLENGES[round.challenge];
+    const threshold = round.threshold ?? def.defaultThreshold;
     const playersByTeam: Record<string, typeof playersMap[string][]> = {};
     for (const p of Object.values(playersMap)) {
       if (!p.teamId) continue;
       (playersByTeam[p.teamId] ??= []).push(p);
     }
     return teamList.map((t) => {
-      const cur = progressMap[t.id]?.[ch];
+      const cur = progressMap[t.id]?.[event.currentRoundIndex!];
       return {
         team: t,
         completedAt: cur?.completedAt ?? null,
@@ -82,11 +79,6 @@ export function JourneyView({ code, myPlayerId }: Props) {
       };
     });
   }, [event, teamList, progressMap, playersMap]);
-
-  const order = useMemo<ChallengeId[]>(() => {
-    if (!event) return [];
-    return enabledChallengeOrder(event.challenges);
-  }, [event]);
 
   const [showCountdown, setShowCountdown] = useState(false);
 
@@ -109,13 +101,13 @@ export function JourneyView({ code, myPlayerId }: Props) {
   // overlay handles the natural lobby→round transition (its onDone navigates
   // when timer expires); after that, players who land on the journey can
   // tap the glowing round card to enter. Otherwise the back button gets
-  // trapped in a loop with /play/[challenge].
+  // trapped in a loop with /play/[index].
 
   if (!event) return null;
 
   const currentIdx = event.currentRoundIndex;
   const currentStatus = event.currentRoundStatus;
-  const totalRounds = order.length;
+  const totalRounds = event.rounds.length;
 
   // For each past / current-decided round, compute MY team's place using
   // the same scoring as RoundResults (north uses smallest avg error, others
@@ -127,12 +119,14 @@ export function JourneyView({ code, myPlayerId }: Props) {
     if (place === 3) return "🥉";
     return "💩";
   }
-  function computeMyPlace(challenge: ChallengeId): number | null {
+  function computeMyPlace(roundIndex: number): number | null {
     if (!myTeamId) return null;
+    const round = event!.rounds[roundIndex];
+    if (!round) return null;
     const teamIds = Object.keys(teams);
     if (teamIds.length === 0) return null;
     const scored = teamIds.map((tid) => {
-      const cur = progressMap[tid]?.[challenge];
+      const cur = progressMap[tid]?.[roundIndex];
       return {
         teamId: tid,
         completedAt: cur?.completedAt ?? null,
@@ -140,7 +134,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
         guesses: cur?.guesses ?? [],
       };
     });
-    if (challenge === "north" || challenge === "time-guess") {
+    if (round.challenge === "north" || round.challenge === "time-guess") {
       scored.sort((a, b) => {
         const ag = a.guesses.length;
         const bg = b.guesses.length;
@@ -167,15 +161,15 @@ export function JourneyView({ code, myPlayerId }: Props) {
 
   const cards: Array<{
     ordinal: number;
-    challenge: ChallengeId;
+    roundIndex: number;
     state: RoundCardState;
-  }> = order.map((challenge, idx) => {
+  }> = event.rounds.map((_, idx) => {
     if (idx < (event.roundWinners?.length ?? 0)) {
       const winnerTeamId = winnerByRound[idx] ?? null;
       const winner = winnerTeamId ? teams[winnerTeamId] ?? null : null;
       return {
         ordinal: idx + 1,
-        challenge,
+        roundIndex: idx,
         state: { kind: "past", winner },
       };
     }
@@ -185,13 +179,13 @@ export function JourneyView({ code, myPlayerId }: Props) {
         const winner = winnerTeamId ? teams[winnerTeamId] ?? null : null;
         return {
           ordinal: idx + 1,
-          challenge,
+          roundIndex: idx,
           state: { kind: "current-decided", winner },
         };
       }
-      return { ordinal: idx + 1, challenge, state: { kind: "current-live" } };
+      return { ordinal: idx + 1, roundIndex: idx, state: { kind: "current-live" } };
     }
-    return { ordinal: idx + 1, challenge, state: { kind: "future" } };
+    return { ordinal: idx + 1, roundIndex: idx, state: { kind: "future" } };
   });
 
   // Determine where the host's "start next" button should go. Lobby has its
@@ -273,21 +267,16 @@ export function JourneyView({ code, myPlayerId }: Props) {
       // if it arrives, is idempotent.
       const fromIndex = redoTarget.roundIndex;
       const ev = res.event;
-      const enabled = enabledChallengeOrder(ev.challenges);
-      const toWipe = enabled.slice(fromIndex);
       const cur = useToastyStore.getState();
       const newProgress: Record<string, typeof cur.progress[string]> = {};
       for (const tid of Object.keys(cur.progress)) {
         const tp = cur.progress[tid];
-        const cleaned = { ...tp };
-        for (const id of toWipe) {
-          cleaned[id] = {
-            value: 0,
-            completed: false,
-            completedAt: null,
-            perPlayer: {},
-            guesses: [],
-          };
+        const cleaned: typeof tp = {};
+        for (const key of Object.keys(tp)) {
+          const idx = Number(key);
+          if (Number.isFinite(idx) && idx < fromIndex) {
+            cleaned[idx] = tp[idx];
+          }
         }
         newProgress[tid] = cleaned;
       }
@@ -335,13 +324,14 @@ export function JourneyView({ code, myPlayerId }: Props) {
     <>
       {showCountdown &&
         currentIdx !== null &&
-        event.currentRoundStartsAt !== null && (
+        event.currentRoundStartsAt !== null &&
+        event.rounds[currentIdx] && (
           <CountdownOverlay
             startsAt={event.currentRoundStartsAt}
-            challenge={order[currentIdx]}
+            challenge={event.rounds[currentIdx].challenge}
             onDone={() => {
               setShowCountdown(false);
-              router.replace(`/e/${code}/play/${order[currentIdx]}`);
+              router.replace(`/e/${code}/play/${currentIdx}`);
             }}
           />
         )}
@@ -420,6 +410,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
         {/* Journey */}
         <div className="flex flex-col gap-2 mt-3">
           {cards.map((card) => {
+            const round = event.rounds[card.roundIndex];
             const isMyTeamWinner =
               card.state.kind === "past" || card.state.kind === "current-decided"
                 ? card.state.winner?.id === myTeamId
@@ -433,7 +424,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                     variant={{
                       kind: "end",
                       entries: endPickerEntries,
-                      challenge: card.challenge,
+                      challenge: round.challenge,
                     }}
                     onEnd={handleEnd}
                   />
@@ -445,7 +436,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                     onRedo={() =>
                       requestRedo(
                         card.ordinal - 1,
-                        `Round ${card.ordinal} · ${CHALLENGES[card.challenge].label}`,
+                        `Round ${card.ordinal} · ${CHALLENGES[round.challenge].label}`,
                       )
                     }
                   />
@@ -470,7 +461,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                     onRedo={() =>
                       requestRedo(
                         card.ordinal - 1,
-                        `Round ${card.ordinal} · ${CHALLENGES[card.challenge].label}`,
+                        `Round ${card.ordinal} · ${CHALLENGES[round.challenge].label}`,
                       )
                     }
                   />
@@ -481,7 +472,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
             const myMedal =
               card.state.kind === "past" ||
               card.state.kind === "current-decided"
-                ? medalForPlace(computeMyPlace(card.challenge))
+                ? medalForPlace(computeMyPlace(card.roundIndex))
                 : null;
 
             // Expandable breakdown for past + current-decided rounds —
@@ -491,13 +482,11 @@ export function JourneyView({ code, myPlayerId }: Props) {
               card.state.kind === "past" ||
               card.state.kind === "current-decided"
             ) {
-              const ch = card.challenge;
-              const def = CHALLENGES[ch];
-              const threshold =
-                event.challenges[ch]?.threshold ?? def.defaultThreshold;
+              const def = CHALLENGES[round.challenge];
+              const threshold = round.threshold ?? def.defaultThreshold;
               const breakdownEntries: BreakdownEntry[] = teamList.map(
                 (t) => {
-                  const tp = progressMap[t.id]?.[ch];
+                  const tp = progressMap[t.id]?.[card.roundIndex];
                   return {
                     team: t,
                     value: tp?.value ?? 0,
@@ -514,7 +503,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                   : null;
               expandable = (
                 <RoundBreakdown
-                  challenge={ch}
+                  challenge={round.challenge}
                   threshold={threshold}
                   roundStartedAt={roundStartedAt}
                   myTeamId={myTeamId}
@@ -526,11 +515,13 @@ export function JourneyView({ code, myPlayerId }: Props) {
 
             return (
               <RoundCard
-                key={card.challenge}
+                key={card.roundIndex}
                 ordinal={card.ordinal}
-                challenge={card.challenge}
+                challenge={round.challenge}
+                threshold={round.threshold ?? CHALLENGES[round.challenge].defaultThreshold}
                 state={card.state}
                 code={code}
+                roundIndex={card.roundIndex}
                 isMyTeamWinner={isMyTeamWinner}
                 myMedal={myMedal}
                 expandable={expandable}

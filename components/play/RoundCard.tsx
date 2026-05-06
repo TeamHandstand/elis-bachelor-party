@@ -14,6 +14,10 @@ export type RoundCardState =
 interface Props {
   ordinal: number; // 1-based round number
   challenge: ChallengeId;
+  threshold: number;
+  // 0-based round index (used for navigation, since multiple rounds may share
+  // the same challenge type).
+  roundIndex: number;
   state: RoundCardState;
   code: string;
   isMyTeamWinner: boolean;
@@ -29,9 +33,32 @@ interface Props {
 
 const ORDINAL_GLYPH = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
 
+function thresholdLabel(challenge: ChallengeId, threshold: number): string {
+  switch (challenge) {
+    case "distance":
+      return `${(threshold / 1609).toFixed(2)} mi`;
+    case "steps":
+      return `${threshold.toLocaleString()} steps`;
+    case "taps":
+      return `${threshold.toLocaleString()} taps`;
+    case "scream":
+      return `${threshold}s sustained`;
+    case "shake":
+      return `${threshold}s sustained`;
+    case "spin":
+      return `${threshold.toLocaleString()} spins`;
+    case "north":
+      return "one guess each";
+    case "time-guess":
+      return `target ${(threshold / 1000).toFixed(0)}s`;
+  }
+}
+
 export function RoundCard({
   ordinal,
   challenge,
+  threshold,
+  roundIndex,
   state,
   code,
   isMyTeamWinner,
@@ -86,7 +113,14 @@ export function RoundCard({
       break;
   }
 
+  // Use the team-winner check to silence unused-prop warnings without
+  // touching the interface — caller still passes it for future tweaks.
+  void isMyTeamWinner;
+
   const isLocked = state.kind === "future";
+  const subtitle = isLocked
+    ? `Round ${ordinal} · ???`
+    : `${def.label} · ${thresholdLabel(challenge, threshold)}`;
 
   const inner = (
     <div className="flex items-center gap-3">
@@ -96,7 +130,7 @@ export function RoundCard({
       <div className="text-3xl">{isLocked ? "❓" : def.emoji}</div>
       <div className="flex-1 min-w-0">
         <div className="font-display font-extrabold tracking-wider uppercase text-sm truncate">
-          {isLocked ? `Round ${ordinal} · ???` : def.label}
+          {subtitle}
         </div>
         {!isLocked && (
           <div className="text-[11px] opacity-60 truncate">{def.description}</div>
@@ -109,7 +143,7 @@ export function RoundCard({
   if (state.kind === "current-live") {
     return (
       <Link
-        href={`/e/${code}/play/${challenge}`}
+        href={`/e/${code}/play/${roundIndex}`}
         className={`${baseClasses} ${toneClasses} block`}
       >
         {inner}

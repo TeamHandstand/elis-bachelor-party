@@ -10,6 +10,7 @@ import type { Unsubscribe } from "@/lib/sensors/types";
 interface Props {
   code: string;
   myPlayerId: string;
+  roundIndex: number;
 }
 
 // Smaller batch = display ticks closer to real time. We also short-circuit
@@ -28,7 +29,7 @@ function isIosMotionGated(): boolean {
   return !!ME && typeof ME.requestPermission === "function";
 }
 
-export function StepsView({ code, myPlayerId }: Props) {
+export function StepsView({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
@@ -41,11 +42,8 @@ export function StepsView({ code, myPlayerId }: Props) {
   const unsubRef = useRef<Unsubscribe | null>(null);
   const [pendingMine, setPendingMine] = useState(0);
 
-  // Decrement pendingMine as the server credits our steps. Mirrors the
-  // pattern in TapsView so the displayed counter is always
-  // teamValue + pendingMine and ticks on every step.
   const myCreditedSteps = Math.floor(
-    (myProgress?.steps.perPlayer?.[myPlayerId] ?? 0) as number,
+    (myProgress?.[roundIndex]?.perPlayer?.[myPlayerId] ?? 0) as number,
   );
   const lastCreditedRef = useRef(0);
   useEffect(() => {
@@ -70,10 +68,10 @@ export function StepsView({ code, myPlayerId }: Props) {
       const store = useToastyStore.getState();
       const ev = store.event;
       const teamSoFar = Math.floor(
-        store.progress[myTeamId]?.steps?.value ?? 0,
+        store.progress[myTeamId]?.[roundIndex]?.value ?? 0,
       );
       const liveThreshold =
-        ev?.challenges.steps.threshold ?? CHALLENGES.steps.defaultThreshold;
+        ev?.rounds[roundIndex]?.threshold ?? CHALLENGES.steps.defaultThreshold;
       const projected = teamSoFar + bufferRef.current;
       const reachedThreshold = projected >= liveThreshold;
       if (bufferRef.current >= BATCH_SIZE || reachedThreshold) {
@@ -83,13 +81,14 @@ export function StepsView({ code, myPlayerId }: Props) {
           kind: "progress",
           playerId: myPlayerId,
           teamId: myTeamId,
+          roundIndex,
           challenge: "steps",
           delta: flush,
           ts: Date.now(),
         }).catch(() => {});
       }
     });
-  }, [myPlayerId, myTeamId, publisher]);
+  }, [myPlayerId, myTeamId, publisher, roundIndex]);
 
   const requestPermAndStart = useCallback(async () => {
     setPerm("requesting");
@@ -141,6 +140,7 @@ export function StepsView({ code, myPlayerId }: Props) {
           kind: "progress",
           playerId: myPlayerId,
           teamId: myTeamId,
+          roundIndex,
           challenge: "steps",
           delta: remainder,
           ts: Date.now(),
@@ -149,11 +149,12 @@ export function StepsView({ code, myPlayerId }: Props) {
       unsubRef.current?.();
       unsubRef.current = null;
     };
-  }, [myPlayerId, myTeamId, publisher, startListening]);
+  }, [myPlayerId, myTeamId, publisher, startListening, roundIndex]);
 
   const def = CHALLENGES.steps;
-  const threshold = event?.challenges.steps.threshold ?? def.defaultThreshold;
-  const teamValue = Math.floor(myProgress?.steps.value ?? 0);
+  const threshold =
+    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
+  const teamValue = Math.floor(myProgress?.[roundIndex]?.value ?? 0);
   // Show the team value with our local in-flight steps applied so the
   // counter ticks on every footfall, not every batch flush.
   const displayedTeam = Math.min(teamValue + pendingMine, threshold);
