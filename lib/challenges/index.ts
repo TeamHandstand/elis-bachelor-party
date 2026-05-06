@@ -252,21 +252,48 @@ export function coerceTriviaQuestions(raw: unknown): TriviaQuestion[] {
       choices?: unknown;
       correctIndex?: unknown;
     };
-    const choices = Array.isArray(o.choices)
+    const rawChoices = Array.isArray(o.choices)
       ? o.choices.filter((c): c is string => typeof c === "string")
       : [];
-    if (choices.length < 2) continue;
-    const prompt = typeof o.prompt === "string" ? o.prompt : "";
-    if (!prompt.trim()) continue;
-    let correctIndex =
+    // Strip leading/trailing whitespace and drop fully-blank choices — the
+    // host UI seeds new rows with empty placeholders, and we don't want them
+    // surviving a save and confusing players at game time.
+    const trackedCorrect =
       typeof o.correctIndex === "number" && Number.isInteger(o.correctIndex)
         ? o.correctIndex
         : 0;
-    if (correctIndex < 0 || correctIndex >= choices.length) correctIndex = 0;
+    const choices: string[] = [];
+    let correctIndex = 0;
+    let correctRetained = false;
+    for (let i = 0; i < rawChoices.length; i++) {
+      const trimmed = rawChoices[i].trim();
+      if (!trimmed) continue;
+      if (i === trackedCorrect) {
+        correctIndex = choices.length;
+        correctRetained = true;
+      }
+      choices.push(trimmed);
+    }
+    if (choices.length < 2) continue;
+    if (!correctRetained) correctIndex = 0;
+    const prompt = typeof o.prompt === "string" ? o.prompt.trim() : "";
+    if (!prompt) continue;
     const id = typeof o.id === "string" && o.id ? o.id : newTriviaQuestionId();
     out.push({ id, prompt, choices, correctIndex });
   }
   return out;
+}
+
+/**
+ * Client-side variant: same cleanup as `coerceTriviaQuestions` but returns
+ * a count of dropped rows so callers can confirm with the user before a
+ * silent save. Use this just before sending to the API.
+ */
+export function sanitizeTriviaQuestionsForSave(
+  questions: TriviaQuestion[],
+): { clean: TriviaQuestion[]; droppedCount: number } {
+  const clean = coerceTriviaQuestions(questions);
+  return { clean, droppedCount: questions.length - clean.length };
 }
 
 /**

@@ -24,11 +24,15 @@ const ChallengeIdSchema = z.enum([
   "trivia",
 ]);
 
+// Permissive: incomplete rows (empty prompt / fewer than 2 non-blank
+// choices) are dropped server-side by coerceTriviaQuestions before save.
+// The schema accepts whatever the editor sends so the host can have
+// half-filled draft rows in flight without 400ing every auto-save.
 const TriviaQuestionSchema = z
   .object({
     id: z.string().min(1).max(64),
-    prompt: z.string().min(1).max(500),
-    choices: z.array(z.string().max(200)).min(2).max(8),
+    prompt: z.string().max(500),
+    choices: z.array(z.string().max(200)).max(8),
     correctIndex: z.number().int().nonnegative(),
   })
   .strict();

@@ -6,6 +6,7 @@ import {
   listTriviaPresets,
 } from "./_fetch";
 import type { TriviaPreset, TriviaQuestion } from "@/lib/types";
+import { sanitizeTriviaQuestionsForSave } from "@/lib/challenges";
 import { TriviaQuestionsEditor } from "./TriviaQuestionsEditor";
 
 interface Props {
@@ -71,9 +72,24 @@ export function TriviaRoundModal({
   async function saveAsPreset() {
     const name = saveAsName.trim();
     if (!name || saving) return;
+    const { clean, droppedCount } = sanitizeTriviaQuestionsForSave(draft);
+    if (clean.length === 0) {
+      alert("Add at least one question with a prompt and two choices first.");
+      return;
+    }
+    if (
+      droppedCount > 0 &&
+      !confirm(
+        `${droppedCount} incomplete question${
+          droppedCount === 1 ? "" : "s"
+        } will be skipped (need a prompt and at least two non-blank choices). Save anyway?`,
+      )
+    ) {
+      return;
+    }
     setSaving(true);
     try {
-      const res = await createTriviaPreset({ name, questions: draft });
+      const res = await createTriviaPreset({ name, questions: clean });
       setPresets((prev) => (prev ? [res.preset, ...prev] : [res.preset]));
       setSaveAsName("");
     } catch (e) {
@@ -84,7 +100,18 @@ export function TriviaRoundModal({
   }
 
   function commit() {
-    onSave(draft);
+    const { clean, droppedCount } = sanitizeTriviaQuestionsForSave(draft);
+    if (
+      droppedCount > 0 &&
+      !confirm(
+        `${droppedCount} incomplete question${
+          droppedCount === 1 ? "" : "s"
+        } will be dropped (need a prompt and at least two non-blank choices). Save anyway?`,
+      )
+    ) {
+      return;
+    }
+    onSave(clean);
     onClose();
   }
 

@@ -10,11 +10,13 @@ import type {
   ListTriviaPresetsResponse,
 } from "@/lib/api/contract";
 
+// Permissive: half-filled rows are scrubbed server-side by
+// coerceTriviaQuestions before persistence.
 const TriviaQuestionSchema = z
   .object({
     id: z.string().min(1).max(64),
-    prompt: z.string().min(1).max(500),
-    choices: z.array(z.string().max(200)).min(2).max(8),
+    prompt: z.string().max(500),
+    choices: z.array(z.string().max(200)).max(8),
     correctIndex: z.number().int().nonnegative(),
   })
   .strict();

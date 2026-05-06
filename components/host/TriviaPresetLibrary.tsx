@@ -10,6 +10,7 @@ import {
 import {
   coerceTriviaQuestions,
   emptyTriviaQuestion,
+  sanitizeTriviaQuestionsForSave,
 } from "@/lib/challenges";
 import type { TriviaPreset, TriviaQuestion } from "@/lib/types";
 import { TriviaQuestionsEditor } from "./TriviaQuestionsEditor";
@@ -174,11 +175,26 @@ function PresetCard({
 
   async function save() {
     if (!dirty || saving) return;
+    const { clean, droppedCount } = sanitizeTriviaQuestionsForSave(questions);
+    if (
+      droppedCount > 0 &&
+      !confirm(
+        `${droppedCount} incomplete question${
+          droppedCount === 1 ? "" : "s"
+        } will be dropped (need a prompt and at least two non-blank choices). Save anyway?`,
+      )
+    ) {
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
-      const res = await updateTriviaPreset(preset.id, { name, questions });
+      const res = await updateTriviaPreset(preset.id, {
+        name,
+        questions: clean,
+      });
       onPatched(res.preset);
+      setQuestions(res.preset.questions);
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 1200);
     } catch (e) {
