@@ -10,11 +10,12 @@ import type { Unsubscribe } from "@/lib/sensors/types";
 interface Props {
   code: string;
   myPlayerId: string;
+  roundIndex: number;
 }
 
 const PUBLISH_THRESHOLD_M = 5;
 
-export function DistanceView({ code, myPlayerId }: Props) {
+export function DistanceView({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
@@ -47,6 +48,7 @@ export function DistanceView({ code, myPlayerId }: Props) {
             kind: "progress",
             playerId: myPlayerId,
             teamId: myTeamId,
+            roundIndex,
             challenge: "distance",
             delta: flushDelta,
             ts: Date.now(),
@@ -65,6 +67,7 @@ export function DistanceView({ code, myPlayerId }: Props) {
           kind: "progress",
           playerId: myPlayerId,
           teamId: myTeamId,
+          roundIndex,
           challenge: "distance",
           delta: remainder,
           ts: Date.now(),
@@ -72,11 +75,12 @@ export function DistanceView({ code, myPlayerId }: Props) {
       }
       unsub?.();
     };
-  }, [myPlayerId, myTeamId, publisher]);
+  }, [myPlayerId, myTeamId, publisher, roundIndex]);
 
   const def = CHALLENGES.distance;
-  const threshold = event?.challenges.distance.threshold ?? def.defaultThreshold;
-  const value = myProgress?.distance.value ?? 0;
+  const threshold =
+    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
+  const value = myProgress?.[roundIndex]?.value ?? 0;
   const miles = (value / 1609).toFixed(2);
   const target = (threshold / 1609).toFixed(1);
 

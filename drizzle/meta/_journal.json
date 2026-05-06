@@ -15,6 +15,13 @@
       "when": 1777938016808,
       "tag": "0001_slow_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779000000000,
+      "tag": "0002_round_indexed_progress",
+      "breakpoints": true
     }
   ]
 }

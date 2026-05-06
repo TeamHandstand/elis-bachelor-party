@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
 import { useRoundStandings } from "@/lib/store/selectors";
-import { CHALLENGES, enabledChallengeOrder } from "@/lib/challenges";
+import { CHALLENGES } from "@/lib/challenges";
 import { normalizeEventCode } from "@/lib/utils/code";
 
 export default function DonePage() {
@@ -31,7 +31,7 @@ export default function DonePage() {
   const won = !!myTeamId && myTeamId === winnerTeamId;
   const winnerTeam = winnerTeamId ? teams[winnerTeamId] : null;
 
-  const order = event ? enabledChallengeOrder(event.challenges) : [];
+  const rounds = event?.rounds ?? [];
   const winners = event?.roundWinners ?? [];
 
   return (
@@ -80,13 +80,13 @@ export default function DonePage() {
         <div className="text-[10px] uppercase tracking-widest opacity-60 mb-2 font-bold">
           round-by-round
         </div>
-        {order.map((id, idx) => {
-          const def = CHALLENGES[id];
+        {rounds.map((r, idx) => {
+          const def = CHALLENGES[r.challenge];
           const w = winners[idx];
           const winningTeam = w ? teams[w.teamId] : null;
           return (
             <div
-              key={id}
+              key={`${idx}-${r.challenge}`}
               className="flex items-center gap-3 py-2 border-b border-bg-deep/40 last:border-0"
             >
               <div className="font-display font-extrabold text-sm opacity-60 w-6 text-center tabular-nums">

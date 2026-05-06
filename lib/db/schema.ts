@@ -50,6 +50,11 @@ export const players = pgTable("players", {
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Progress is keyed by ROUND INDEX (not by challenge id) so the same
+// challenge type can appear in multiple rounds with independent state.
+// `challenge` is kept as an informational column — the server writes
+// the challenge id of the round there for debugging / results display,
+// but it doesn't participate in the primary key.
 export const finalProgress = pgTable(
   "final_progress",
   {
@@ -59,13 +64,14 @@ export const finalProgress = pgTable(
     teamId: uuid("team_id")
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
-    challenge: text("challenge").notNull(),
+    roundIndex: integer("round_index").notNull(),
+    challenge: text("challenge").notNull().default(""),
     value: numeric("value").notNull().default("0"),
     completed: boolean("completed").notNull().default(false),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (table) => ({
-    pk: primaryKey({ columns: [table.eventId, table.teamId, table.challenge] }),
+    pk: primaryKey({ columns: [table.eventId, table.teamId, table.roundIndex] }),
   }),
 );
 

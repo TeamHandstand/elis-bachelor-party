@@ -2,8 +2,13 @@
 import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
 import { useRoundStandings } from "@/lib/store/selectors";
-import { CHALLENGES, CHALLENGE_ORDER } from "@/lib/challenges";
-import type { ChallengeId, Player, Team, TeamProgress } from "@/lib/types";
+import { CHALLENGES } from "@/lib/challenges";
+import type {
+  Player,
+  RoundConfig,
+  Team,
+  TeamProgress,
+} from "@/lib/types";
 
 interface Props {
   code: string;
@@ -26,8 +31,6 @@ export default function HostMonitor({ code }: Props) {
       </div>
     );
   }
-
-  const enabled = CHALLENGE_ORDER.filter((id) => event.challenges[id]?.enabled);
 
   return (
     <section className="space-y-4">
@@ -65,10 +68,9 @@ export default function HostMonitor({ code }: Props) {
               team={row.team}
               players={teamPlayers}
               progress={tp}
-              enabled={enabled}
-              thresholds={event.challenges}
+              rounds={event.rounds}
               wins={row.wins}
-              totalRounds={enabled.length}
+              totalRounds={event.rounds.length}
               place={place}
             />
           );
@@ -82,8 +84,7 @@ function TeamMonitorCard({
   team,
   players,
   progress,
-  enabled,
-  thresholds,
+  rounds,
   wins,
   totalRounds,
   place,
@@ -91,8 +92,7 @@ function TeamMonitorCard({
   team: Team;
   players: Player[];
   progress: TeamProgress | undefined;
-  enabled: ChallengeId[];
-  thresholds: Record<ChallengeId, { enabled: boolean; threshold: number }>;
+  rounds: RoundConfig[];
   wins: number;
   totalRounds: number;
   place: number;
@@ -129,30 +129,40 @@ function TeamMonitorCard({
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        {CHALLENGE_ORDER.map((id) => {
-          const def = CHALLENGES[id];
-          const isEnabled = enabled.includes(id);
-          const cur = progress?.[id];
+        {rounds.length === 0 ? (
+          <div className="col-span-2 text-xs opacity-50 italic py-4 text-center">
+            no rounds configured
+          </div>
+        ) : null}
+        {rounds.map((r, idx) => {
+          const def = CHALLENGES[r.challenge];
+          const cur = progress?.[idx];
           const completed = cur?.completed ?? false;
-          const threshold = thresholds[id]?.threshold ?? def.defaultThreshold;
-          const valueStr = cur ? def.formatProgress(cur.value, threshold) : "—";
+          const threshold = r.threshold ?? def.defaultThreshold;
+          // For Due North, surface guesses-in / total instead of "0 / 0".
+          const valueStr = cur
+            ? r.challenge === "north"
+              ? `${(cur.guesses ?? []).length} guesses in`
+              : def.formatProgress(cur.value, threshold)
+            : "—";
           return (
             <div
-              key={id}
+              key={`${idx}-${r.challenge}`}
               className={`rounded-xl p-2 border text-xs ${
-                !isEnabled
-                  ? "border-white/5 bg-black/20 opacity-40"
-                  : completed
-                    ? "border-transparent bg-gradient-done text-white"
-                    : "border-white/10 bg-bg-deep"
+                completed
+                  ? "border-transparent bg-gradient-done text-white"
+                  : "border-white/10 bg-bg-deep"
               }`}
             >
               <div className="flex items-center gap-1">
+                <span className="text-[10px] opacity-60 font-bold tabular-nums">
+                  {idx + 1}.
+                </span>
                 <span className="text-base">{def.emoji}</span>
                 <span className="font-bold truncate">{def.label}</span>
               </div>
               <div className="opacity-90 mt-1 tabular-nums">
-                {!isEnabled ? "disabled" : completed ? "✅ DONE" : valueStr}
+                {completed ? "✅ DONE" : valueStr}
               </div>
             </div>
           );

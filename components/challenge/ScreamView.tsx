@@ -11,12 +11,13 @@ import type { Unsubscribe } from "@/lib/sensors/types";
 interface Props {
   code: string;
   myPlayerId: string;
+  roundIndex: number;
 }
 
 const PUBLISH_INTERVAL_MS = 250;
 const SCREAM_DB = 80;
 
-export function ScreamView({ code, myPlayerId }: Props) {
+export function ScreamView({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const teammates = useTeammates();
@@ -33,8 +34,9 @@ export function ScreamView({ code, myPlayerId }: Props) {
   const lastLevelRef = useRef(0);
 
   const def = CHALLENGES.scream;
-  const threshold = event?.challenges.scream.threshold ?? def.defaultThreshold; // seconds
-  const teamCompleted = !!myProgress?.scream.completed;
+  const threshold =
+    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold; // seconds
+  const teamCompleted = !!myProgress?.[roundIndex]?.completed;
 
   useEffect(() => {
     if (!myTeamId) return;
@@ -59,6 +61,7 @@ export function ScreamView({ code, myPlayerId }: Props) {
             kind: "live",
             playerId: myPlayerId,
             teamId: myTeamId,
+            roundIndex,
             challenge: "scream",
             level,
             ts: now,
@@ -71,7 +74,7 @@ export function ScreamView({ code, myPlayerId }: Props) {
       cancelled = true;
       unsub?.();
     };
-  }, [myPlayerId, myTeamId, publisher]);
+  }, [myPlayerId, myTeamId, publisher, roundIndex]);
 
   // Detect "all 3 above 80dB sustained for `threshold` seconds" and publish complete.
   useEffect(() => {
@@ -96,6 +99,7 @@ export function ScreamView({ code, myPlayerId }: Props) {
             publisher({
               kind: "complete",
               teamId: myTeamId,
+              roundIndex,
               challenge: "scream",
               ts: now,
             }).catch(() => {});
@@ -106,7 +110,7 @@ export function ScreamView({ code, myPlayerId }: Props) {
       }
     }, 200);
     return () => clearInterval(interval);
-  }, [myTeamId, teammates, liveLevels, myPlayerId, threshold, teamCompleted, completeSent, publisher]);
+  }, [myTeamId, teammates, liveLevels, myPlayerId, threshold, teamCompleted, completeSent, publisher, roundIndex]);
 
   const others = teammates.filter((p) => p.id !== myPlayerId);
   const meAbove = myLevel >= SCREAM_DB;

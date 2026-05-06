@@ -9,11 +9,12 @@ import { CHALLENGES } from "@/lib/challenges";
 interface Props {
   code: string;
   myPlayerId: string;
+  roundIndex: number;
 }
 
 type Phase = "idle" | "running" | "submitted";
 
-export function TimeGuessView({ code, myPlayerId }: Props) {
+export function TimeGuessView({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
@@ -21,9 +22,10 @@ export function TimeGuessView({ code, myPlayerId }: Props) {
   const teammates = useTeammates();
 
   const def = CHALLENGES["time-guess"];
-  const targetMs = event?.challenges["time-guess"]?.threshold ?? def.defaultThreshold;
+  const targetMs =
+    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
 
-  const guesses = myProgress?.["time-guess"].guesses ?? [];
+  const guesses = myProgress?.[roundIndex]?.guesses ?? [];
   const myGuess = guesses.find((g) => g.playerId === myPlayerId);
 
   const [phase, setPhase] = useState<Phase>(myGuess ? "submitted" : "idle");
@@ -62,6 +64,7 @@ export function TimeGuessView({ code, myPlayerId }: Props) {
       kind: "guess",
       playerId: myPlayerId,
       teamId: myTeamId,
+      roundIndex,
       challenge: "time-guess",
       errorDeg: deviation, // ms — reused field name from generic guess msg
       ts: Date.now(),

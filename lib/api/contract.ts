@@ -6,6 +6,7 @@ import type {
   EventConfig,
   EventStatus,
   Player,
+  RoundConfig,
   Team,
 } from "@/lib/types";
 
@@ -60,11 +61,13 @@ export interface GetEventResponse {
 }
 
 // ---------- PATCH /api/events/:code ----------
-// Host updates config (title, groom, challenges, team names/emoji). Requires host cookie.
+// Host updates config (title, groom, rounds, team names/emoji). Requires host cookie.
 export interface UpdateEventRequest {
   title?: string;
   groomName?: string;
-  challenges?: EventConfig["challenges"];
+  // Full ordered list of rounds. The server replaces the stored list on each
+  // PATCH; the host UI sends the current sequence after every drag/add/remove.
+  rounds?: RoundConfig[];
   teams?: Array<{ id: string; name?: string; emoji?: string; color?: string }>;
 }
 export interface UpdateEventResponse {
@@ -167,7 +170,8 @@ export interface ResetEventResponse {
 // same team can flush concurrently).
 export interface ProgressSnapshotRequest {
   teamId: string;
-  challenges: Array<{
+  rounds: Array<{
+    roundIndex: number;
     challenge: ChallengeId;
     value: number;
     completed: boolean;
@@ -184,6 +188,7 @@ export interface ProgressSnapshotResponse {
 export interface GetProgressResponse {
   progress: Array<{
     teamId: string;
+    roundIndex: number;
     challenge: ChallengeId;
     value: number;
     completed: boolean;
@@ -199,6 +204,7 @@ export interface ResultsResponse {
   players: Player[];
   finalProgress: Array<{
     teamId: string;
+    roundIndex: number;
     challenge: ChallengeId;
     value: number;
     completed: boolean;
@@ -232,7 +238,7 @@ export interface StartRoundResponse {
 // ---------- POST /api/events/:code/round/end ----------
 // Auth modes:
 //  - mode='auto': any client; server validates the team has completed
-//    the current challenge in final_progress.
+//    the current round in final_progress.
 //  - mode='host': requires host-cookie OR matching playerId.
 export interface EndRoundRequest {
   mode: "auto" | "host";

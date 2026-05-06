@@ -10,13 +10,14 @@ import type { Unsubscribe } from "@/lib/sensors/types";
 interface Props {
   code: string;
   myPlayerId: string;
+  roundIndex: number;
 }
 
 // Smaller batch = teammates' contributions show up faster, at the cost of
 // more PubNub messages. 3 is a good middle ground for a one-off party event.
 const BATCH_SIZE = 3;
 
-export function TapsView({ code, myPlayerId }: Props) {
+export function TapsView({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
@@ -24,18 +25,15 @@ export function TapsView({ code, myPlayerId }: Props) {
 
   const padRef = useRef<HTMLDivElement | null>(null);
   const bufferRef = useRef(0);
-  // pendingMine reflects bufferRef in state so React re-renders. We don't
-  // reset it to 0 on flush — instead we let the round-tripped server credit
-  // (`myCredited`) consume it via a watcher effect, which keeps the displayed
-  // total monotonically increasing.
   const [pendingMine, setPendingMine] = useState(0);
   const [flash, setFlash] = useState(false);
 
   const def = CHALLENGES.taps;
-  const threshold = event?.challenges.taps.threshold ?? def.defaultThreshold;
-  const teamValue = Math.floor(myProgress?.taps.value ?? 0);
+  const threshold =
+    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
+  const teamValue = Math.floor(myProgress?.[roundIndex]?.value ?? 0);
   const myCredited = Math.floor(
-    (myProgress?.taps.perPlayer?.[myPlayerId] ?? 0) as number,
+    (myProgress?.[roundIndex]?.perPlayer?.[myPlayerId] ?? 0) as number,
   );
 
   // Decrement pendingMine as the server credits our taps. If teamValue resets
@@ -68,14 +66,9 @@ export function TapsView({ code, myPlayerId }: Props) {
         bufferRef.current += 1;
         setPendingMine((p) => p + 1);
         setFlash((f) => !f);
-        // Flush when batch is full, OR when our local view is within reach
-        // of the threshold so the round can decide before the user keeps
-        // tapping. (Race: previously the user could see "10 / 10" locally
-        // while the team value lagged at 9 because the buffered taps hadn't
-        // shipped. Flushing eagerly near the line fixes that.)
         const store = useToastyStore.getState();
         const teamSoFar = Math.floor(
-          store.progress[myTeamId]?.taps?.value ?? 0,
+          store.progress[myTeamId]?.[roundIndex]?.value ?? 0,
         );
         const projected = teamSoFar + bufferRef.current;
         const reachedThreshold =
@@ -87,6 +80,7 @@ export function TapsView({ code, myPlayerId }: Props) {
             kind: "progress",
             playerId: myPlayerId,
             teamId: myTeamId,
+            roundIndex,
             challenge: "taps",
             delta: flush,
             ts: Date.now(),
@@ -104,6 +98,7 @@ export function TapsView({ code, myPlayerId }: Props) {
           kind: "progress",
           playerId: myPlayerId,
           teamId: myTeamId,
+          roundIndex,
           challenge: "taps",
           delta: remainder,
           ts: Date.now(),
@@ -111,7 +106,7 @@ export function TapsView({ code, myPlayerId }: Props) {
       }
       unsub?.();
     };
-  }, [myPlayerId, myTeamId, publisher]);
+  }, [myPlayerId, myTeamId, publisher, roundIndex, threshold]);
 
   const displayedTeam = teamValue + pendingMine;
 

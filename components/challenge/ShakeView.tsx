@@ -11,13 +11,14 @@ import type { Unsubscribe } from "@/lib/sensors/types";
 interface Props {
   code: string;
   myPlayerId: string;
+  roundIndex: number;
 }
 
 const PUBLISH_INTERVAL_MS = 250;
 // ShakeDetector emits |mag - 9.8|; "12 m/s² magnitude" => deviation ~2.2.
 const SHAKE_DEVIATION = 2.2;
 
-export function ShakeView({ code, myPlayerId }: Props) {
+export function ShakeView({ code, myPlayerId, roundIndex }: Props) {
   const publisher = usePublisher(code);
   const myTeamId = useToastyStore((s) => s.myTeamId);
   const teammates = useTeammates();
@@ -34,8 +35,9 @@ export function ShakeView({ code, myPlayerId }: Props) {
   const lastLevelRef = useRef(0);
 
   const def = CHALLENGES.shake;
-  const threshold = event?.challenges.shake.threshold ?? def.defaultThreshold;
-  const teamCompleted = !!myProgress?.shake.completed;
+  const threshold =
+    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
+  const teamCompleted = !!myProgress?.[roundIndex]?.completed;
 
   useEffect(() => {
     if (!myTeamId) return;
@@ -60,6 +62,7 @@ export function ShakeView({ code, myPlayerId }: Props) {
             kind: "live",
             playerId: myPlayerId,
             teamId: myTeamId,
+            roundIndex,
             challenge: "shake",
             level,
             ts: now,
@@ -72,7 +75,7 @@ export function ShakeView({ code, myPlayerId }: Props) {
       cancelled = true;
       unsub?.();
     };
-  }, [myPlayerId, myTeamId, publisher]);
+  }, [myPlayerId, myTeamId, publisher, roundIndex]);
 
   useEffect(() => {
     if (!myTeamId || teamCompleted || completeSent) return;
@@ -96,6 +99,7 @@ export function ShakeView({ code, myPlayerId }: Props) {
             publisher({
               kind: "complete",
               teamId: myTeamId,
+              roundIndex,
               challenge: "shake",
               ts: now,
             }).catch(() => {});
@@ -106,7 +110,7 @@ export function ShakeView({ code, myPlayerId }: Props) {
       }
     }, 150);
     return () => clearInterval(interval);
-  }, [myTeamId, teammates, liveLevels, myPlayerId, threshold, teamCompleted, completeSent, publisher]);
+  }, [myTeamId, teammates, liveLevels, myPlayerId, threshold, teamCompleted, completeSent, publisher, roundIndex]);
 
   const others = teammates.filter((p) => p.id !== myPlayerId);
   const meAbove = myLevel >= SHAKE_DEVIATION;
