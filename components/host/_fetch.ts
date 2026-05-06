@@ -93,6 +93,15 @@ export async function assignPlayer(
   );
 }
 
+export async function deletePlayer(
+  code: string,
+  playerId: string,
+): Promise<{ ok: true }> {
+  return http<{ ok: true }>(`/api/events/${code}/players/${playerId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function startEvent(code: string): Promise<StartEventResponse> {
   return http<StartEventResponse>(`/api/events/${code}/start`, { method: "POST" });
 }

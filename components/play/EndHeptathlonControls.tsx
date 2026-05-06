@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 import type { Team } from "@/lib/types";
+import { formatPoints } from "@/lib/scoring";
 
 interface Props {
   teams: Team[];
-  // Map of team id -> round wins so far. Used to pre-recommend the leader
+  // Map of team id -> total points so far. Used to pre-recommend the leader
   // when the host opens the picker.
-  winsByTeamId: Record<string, number>;
+  pointsByTeamId: Record<string, number>;
   onEnd: (winnerTeamId: string | null) => Promise<void> | void; // null = no winner
   // When true, all rounds are decided and the host is just releasing the
   // already-computed scoreboard. Switches the button copy from
@@ -18,11 +19,11 @@ interface Props {
 /**
  * Big, red, host-only "end the heptathlon now" affordance pinned near the
  * top of the journey view. Tapping opens a picker that pre-highlights the
- * team currently leading by round wins; the host can confirm or override.
+ * team currently leading by total points; the host can confirm or override.
  */
 export function EndHeptathlonControls({
   teams,
-  winsByTeamId,
+  pointsByTeamId,
   onEnd,
   releaseMode = false,
 }: Props) {
@@ -31,16 +32,16 @@ export function EndHeptathlonControls({
 
   const sortedTeams = useMemo(() => {
     return [...teams].sort((a, b) => {
-      const aw = winsByTeamId[a.id] ?? 0;
-      const bw = winsByTeamId[b.id] ?? 0;
-      if (aw !== bw) return bw - aw;
+      const ap = pointsByTeamId[a.id] ?? 0;
+      const bp = pointsByTeamId[b.id] ?? 0;
+      if (ap !== bp) return bp - ap;
       return a.name.localeCompare(b.name);
     });
-  }, [teams, winsByTeamId]);
+  }, [teams, pointsByTeamId]);
 
   const leader = sortedTeams[0];
-  const leaderWins = leader ? (winsByTeamId[leader.id] ?? 0) : 0;
-  const hasLeader = leader && leaderWins > 0;
+  const leaderPoints = leader ? (pointsByTeamId[leader.id] ?? 0) : 0;
+  const hasLeader = leader && leaderPoints > 0;
 
   async function pick(winnerTeamId: string | null) {
     if (busy) return;
@@ -80,7 +81,7 @@ export function EndHeptathlonControls({
       </div>
       <div className="flex flex-col gap-2">
         {sortedTeams.map((t, idx) => {
-          const wins = winsByTeamId[t.id] ?? 0;
+          const points = pointsByTeamId[t.id] ?? 0;
           const isRecommended = idx === 0 && hasLeader;
           return (
             <button
@@ -98,7 +99,7 @@ export function EndHeptathlonControls({
                 <span className="text-xl">{t.emoji}</span>
                 <span className="flex-1 truncate">{t.name}</span>
                 <span className="text-sm tabular-nums opacity-90">
-                  {wins} {wins === 1 ? "win" : "wins"}
+                  {formatPoints(points)} {points === 1 ? "pt" : "pts"}
                 </span>
                 {isRecommended && (
                   <span className="text-[10px] uppercase tracking-widest text-accent-green font-extrabold">
