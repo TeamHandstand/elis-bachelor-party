@@ -62,6 +62,12 @@ function thresholdLabel(challenge: ChallengeId, threshold: number): string {
         : "spin & step segments";
     case "flappy":
       return `${threshold}m team total`;
+    case "air-time":
+      return `${threshold}s airborne`;
+    case "tilt-maze":
+      return `${threshold} mazes`;
+    case "selfie-sync":
+      return `${threshold}s sustained`;
     case "punishment":
       return "non-scoring";
   }

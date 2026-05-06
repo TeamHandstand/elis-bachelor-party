@@ -17,6 +17,18 @@ export type ChallengeId =
   // Flappy-Bird-style mic game: yell to flap, dodge pipes. Each player runs
   // their own session locally; meters traveled are summed across the team.
   | "flappy"
+  // Phone-toss freefall challenge. Accelerometer detects airborne intervals
+  // (mag → 0 during free fall); each interval's seconds-airborne is summed
+  // across the team toward the round threshold.
+  | "air-time"
+  // Procedural marble-maze, controlled by DeviceOrientation tilt. Each
+  // cleared maze contributes 1 toward the team-total threshold. Players
+  // pass the phone after each level (anti-hog: front-cam face must change).
+  | "tilt-maze"
+  // All teammates make the same target facial expression simultaneously
+  // (front camera + face-landmark blendshapes) for a sustained number of
+  // seconds. Same all-simultaneous shape as scream/shake.
+  | "selfie-sync"
   // Not really a challenge — a "punishment line" the host drops between
   // rounds. When live, the team currently in last place gets called out on a
   // fullscreen takeover with the punishment message; host marks complete.
@@ -54,7 +66,10 @@ export interface ProgressDeltaMsg {
   playerId: string;
   teamId: string;
   roundIndex: number;
-  challenge: Exclude<ChallengeId, "scream" | "shake" | "north">;
+  challenge: Exclude<
+    ChallengeId,
+    "scream" | "shake" | "north" | "selfie-sync"
+  >;
   delta: number;
   ts: number;
 }
@@ -64,8 +79,9 @@ export interface LiveLevelMsg {
   playerId: string;
   teamId: string;
   roundIndex: number;
-  challenge: "scream" | "shake";
-  level: number; // dB or accel magnitude
+  // scream → dB, shake → |accel − g|, selfie-sync → 0..1 expression match.
+  challenge: "scream" | "shake" | "selfie-sync";
+  level: number;
   ts: number;
 }
 

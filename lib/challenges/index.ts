@@ -135,6 +135,44 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
       "Flappy Bird, but yelling makes the bird fly. Total team meters wins.",
     formatProgress: (v, t) => `${Math.floor(v)} / ${t} m`,
   },
+  "air-time": {
+    id: "air-time",
+    label: "Air Time",
+    emoji: "✈️",
+    // 30 seconds is roughly ~60-90 throws of a phone with a half-second hang
+    // each. Tunable by host.
+    defaultThreshold: 30,
+    unit: "airborne sec",
+    aggregation: "team-total",
+    description:
+      "Toss your phone (carefully). Total team seconds airborne wins.",
+    formatProgress: (v, t) =>
+      `${v.toFixed(1)} / ${t.toFixed(1)}s airborne`,
+  },
+  "tilt-maze": {
+    id: "tilt-maze",
+    label: "Tilt Maze",
+    emoji: "🌐",
+    defaultThreshold: 10,
+    unit: "levels",
+    aggregation: "team-total",
+    description:
+      "Tilt to roll a marble through a maze. Pass the phone — first team to clear N levels wins.",
+    formatProgress: (v, t) =>
+      `${Math.floor(v).toLocaleString()} / ${t} levels`,
+  },
+  "selfie-sync": {
+    id: "selfie-sync",
+    label: "Selfie Sync",
+    emoji: "😱",
+    // sustained seconds of all-three-faces-matching the target expression.
+    defaultThreshold: 5,
+    unit: "sec sustained",
+    aggregation: "all-simultaneous",
+    description:
+      "All teammates make the same target face simultaneously for the target seconds.",
+    formatProgress: (v, t) => `${v.toFixed(0)}s / ${t}s`,
+  },
   punishment: {
     id: "punishment",
     label: "Punishment",
@@ -191,6 +229,12 @@ export function challengeCommand(id: ChallengeId, threshold: number): string {
       return `Clear every spin & step segment in order — first team done wins!`;
     case "flappy":
       return `Yell to flap, dodge pipes — fly ${threshold}m as a team!`;
+    case "air-time":
+      return `Toss the phone — total team airtime: ${threshold} seconds!`;
+    case "tilt-maze":
+      return `Tilt your way through ${threshold} mazes — pass the phone, race the others!`;
+    case "selfie-sync":
+      return `All teammates: same face, simultaneously, for ${threshold} seconds!`;
     case "punishment":
       return `Losing team — your time has come.`;
   }
@@ -208,6 +252,9 @@ export const CHALLENGE_ORDER: ChallengeId[] = [
   "trivia",
   "interleave",
   "flappy",
+  "air-time",
+  "tilt-maze",
+  "selfie-sync",
 ];
 
 /**

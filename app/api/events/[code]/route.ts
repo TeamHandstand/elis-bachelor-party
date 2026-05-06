@@ -24,6 +24,9 @@ const ChallengeIdSchema = z.enum([
   "trivia",
   "interleave",
   "flappy",
+  "air-time",
+  "tilt-maze",
+  "selfie-sync",
   "punishment",
 ]);
 

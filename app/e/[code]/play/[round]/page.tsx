@@ -30,6 +30,9 @@ import { TimeGuessView } from "@/components/challenge/TimeGuessView";
 import { TriviaView } from "@/components/challenge/TriviaView";
 import { InterleaveView } from "@/components/challenge/InterleaveView";
 import { FlappyView } from "@/components/challenge/FlappyView";
+import { AirTimeView } from "@/components/challenge/AirTimeView";
+import { TiltMazeView } from "@/components/challenge/TiltMazeView";
+import { SelfieSyncView } from "@/components/challenge/SelfieSyncView";
 
 export default function ChallengePage() {
   const router = useRouter();
@@ -280,6 +283,15 @@ export default function ChallengePage() {
       break;
     case "flappy":
       view = <FlappyView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
+      break;
+    case "air-time":
+      view = <AirTimeView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
+      break;
+    case "tilt-maze":
+      view = <TiltMazeView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
+      break;
+    case "selfie-sync":
+      view = <SelfieSyncView code={code} myPlayerId={myPlayerId} roundIndex={roundIndex} />;
       break;
   }
 

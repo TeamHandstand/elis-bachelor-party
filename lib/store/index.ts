@@ -53,8 +53,8 @@ export interface ToastyStore {
   // progress, indexed by team -> round index
   progress: Record<string /*teamId*/, TeamProgress>;
 
-  // ephemeral live levels for scream/shake (last sample per player)
-  liveLevels: Record<string /*playerId*/, Partial<Record<"scream" | "shake", { level: number; ts: number }>>>;
+  // ephemeral live levels for scream/shake/selfie-sync (last sample per player)
+  liveLevels: Record<string /*playerId*/, Partial<Record<"scream" | "shake" | "selfie-sync", { level: number; ts: number }>>>;
 
   // ---- actions ----
   bootstrap(args: {

@@ -1235,7 +1235,9 @@ export async function endRound(input: {
         challenge === "distance" ||
         challenge === "steps" ||
         challenge === "taps" ||
-        challenge === "spin"
+        challenge === "spin" ||
+        challenge === "air-time" ||
+        challenge === "tilt-maze"
       ) {
         // Accumulators: no team finished — highest progress wins.
         const roundRows = fpRows.filter((r) => r.roundIndex === idx);

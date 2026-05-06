@@ -23,6 +23,9 @@ const challengeIdSchema = z.enum([
   "time-guess",
   "interleave",
   "flappy",
+  "air-time",
+  "tilt-maze",
+  "selfie-sync",
 ]);
 
 const snapshotSchema = z
