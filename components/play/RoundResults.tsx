@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { CHALLENGES } from "@/lib/challenges";
 import type { ChallengeId, Player, Team } from "@/lib/types";
+import { formatPoints, rankRound, type RankInput } from "@/lib/scoring";
 
 export interface ResultEntry {
   team: Team;
@@ -58,42 +59,20 @@ function northAvgError(entry: ResultEntry): number {
   return northTotalError(entry) / g.length;
 }
 
-function sortEntries(entries: ResultEntry[], challenge: ChallengeId): ResultEntry[] {
-  if (challenge === "north" || challenge === "time-guess") {
-    return [...entries].sort((a, b) => {
-      const ag = a.guesses?.length ?? 0;
-      const bg = b.guesses?.length ?? 0;
-      // teams with at least one guess come first, then by lowest average error
-      if ((ag > 0) !== (bg > 0)) return ag > 0 ? -1 : 1;
-      if (ag === 0 && bg === 0) return 0;
-      return northAvgError(a) - northAvgError(b);
-    });
-  }
-  if (challenge === "trivia") {
-    return [...entries].sort((a, b) => {
-      const aDone = a.completedAt !== null;
-      const bDone = b.completedAt !== null;
-      if (aDone !== bDone) return aDone ? -1 : 1;
-      if (a.value !== b.value) return b.value - a.value;
-      return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
-    });
-  }
-  return [...entries].sort((a, b) => {
-    const aDone = a.completedAt !== null;
-    const bDone = b.completedAt !== null;
-    if (aDone !== bDone) return aDone ? -1 : 1;
-    if (aDone && bDone) {
-      return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
-    }
-    return b.value - a.value;
-  });
+function toRankInput(entry: ResultEntry): RankInput {
+  return {
+    team: entry.team,
+    value: entry.value,
+    completedAt: entry.completedAt,
+    guesses: entry.guesses ?? [],
+  };
 }
 
-function rankBadge(idx: number): string {
-  if (idx === 0) return "🥇";
-  if (idx === 1) return "🥈";
-  if (idx === 2) return "🥉";
-  return `#${idx + 1}`;
+function rankBadge(rank: number): string {
+  if (rank === 1) return "🥇";
+  if (rank === 2) return "🥈";
+  if (rank === 3) return "🥉";
+  return `#${rank}`;
 }
 
 export function RoundResults({
@@ -126,10 +105,15 @@ export function RoundResults({
     );
   }
 
-  const sorted = sortEntries(entries, challenge);
+  const ranked = rankRound(
+    challenge,
+    entries.map(toRankInput),
+    winnerTeamId ?? null,
+  );
+  const entryById = new Map(entries.map((e) => [e.team.id, e] as const));
   const winnerEntry =
     winnerTeamId !== undefined && winnerTeamId !== null
-      ? entries.find((e) => e.team.id === winnerTeamId)
+      ? entryById.get(winnerTeamId) ?? null
       : null;
   const iWon = !!myTeamId && myTeamId === winnerTeamId;
   const haveMyTeam = !!myTeamId && entries.some((e) => e.team.id === myTeamId);
@@ -154,20 +138,25 @@ export function RoundResults({
           </div>
         ) : null}
       </div>
-      {sorted.map((entry, idx) => (
-        <TeamResultRow
-          key={entry.team.id}
-          challenge={challenge}
-          threshold={threshold}
-          roundStartedAt={roundStartedAt}
-          entry={entry}
-          rank={idx + 1}
-          isMine={entry.team.id === myTeamId}
-          isWinner={entry.team.id === winnerTeamId}
-          players={players}
-          triviaQuestions={triviaQuestions}
-        />
-      ))}
+      {ranked.map((row) => {
+        const entry = entryById.get(row.team.id);
+        if (!entry) return null;
+        return (
+          <TeamResultRow
+            key={entry.team.id}
+            challenge={challenge}
+            threshold={threshold}
+            roundStartedAt={roundStartedAt}
+            entry={entry}
+            rank={row.rank}
+            points={row.points}
+            isMine={entry.team.id === myTeamId}
+            isWinner={entry.team.id === winnerTeamId}
+            players={players}
+            triviaQuestions={triviaQuestions}
+          />
+        );
+      })}
       {code ? (
         <Link
           href={`/e/${code}/play`}
@@ -365,6 +354,7 @@ function TeamResultRow({
   roundStartedAt,
   entry,
   rank,
+  points,
   isMine,
   isWinner,
   players,
@@ -375,6 +365,7 @@ function TeamResultRow({
   roundStartedAt: number | null;
   entry: ResultEntry;
   rank: number;
+  points: number;
   isMine: boolean;
   isWinner: boolean;
   players: Record<string, Player>;
@@ -438,7 +429,7 @@ function TeamResultRow({
     <div className={`rounded-2xl p-3 ${rowClass}`}>
       <div className="flex items-center gap-3">
         <div className="font-display font-extrabold text-lg w-10 text-center opacity-80">
-          {rankBadge(rank - 1)}
+          {rankBadge(rank)}
         </div>
         <div className="text-2xl">{entry.team.emoji}</div>
         <div className="flex-1 min-w-0">
@@ -453,6 +444,9 @@ function TeamResultRow({
         <div className="text-right">
           <div className="font-display text-xl font-extrabold tabular-nums">
             {primary}
+          </div>
+          <div className="text-[10px] uppercase tracking-widest font-extrabold tabular-nums opacity-80">
+            +{formatPoints(points)} {points === 1 ? "pt" : "pts"}
           </div>
           {isWinner && (
             <div className="text-[10px] uppercase tracking-widest font-extrabold opacity-90">

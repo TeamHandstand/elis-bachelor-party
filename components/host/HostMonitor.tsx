@@ -3,6 +3,8 @@ import { useEventBootstrap } from "@/lib/store/bootstrap";
 import { useToastyStore } from "@/lib/store";
 import { useRoundStandings } from "@/lib/store/selectors";
 import { CHALLENGES } from "@/lib/challenges";
+import { formatPoints } from "@/lib/scoring";
+import { ScoringExplainer } from "@/components/play/ScoringExplainer";
 import type {
   Player,
   RoundConfig,
@@ -36,22 +38,25 @@ export default function HostMonitor({ code }: Props) {
     <section className="space-y-4">
       <div className="flex items-baseline justify-between flex-wrap gap-2">
         <h2 className="font-display text-xl font-bold">📡 Live monitor</h2>
-        <div className="text-xs opacity-60">
-          Status:{" "}
-          <span
-            className={
-              event.status === "active"
-                ? "text-accent-green font-bold"
-                : event.status === "finished"
-                  ? "text-accent-orange font-bold"
-                  : "opacity-80"
-            }
-          >
-            {event.status}
+        <div className="flex items-center gap-2 text-xs opacity-60">
+          <span>
+            Status:{" "}
+            <span
+              className={
+                event.status === "active"
+                  ? "text-accent-green font-bold"
+                  : event.status === "finished"
+                    ? "text-accent-orange font-bold"
+                    : "opacity-80"
+              }
+            >
+              {event.status}
+            </span>
+            {event.winnerTeamId
+              ? ` — winner: ${teams[event.winnerTeamId]?.name ?? "?"}`
+              : ""}
           </span>
-          {event.winnerTeamId
-            ? ` — winner: ${teams[event.winnerTeamId]?.name ?? "?"}`
-            : ""}
+          <ScoringExplainer teamCount={standings.length} />
         </div>
       </div>
 
@@ -69,6 +74,7 @@ export default function HostMonitor({ code }: Props) {
               players={teamPlayers}
               progress={tp}
               rounds={event.rounds}
+              points={row.points}
               wins={row.wins}
               totalRounds={event.rounds.length}
               place={place}
@@ -85,6 +91,7 @@ function TeamMonitorCard({
   players,
   progress,
   rounds,
+  points,
   wins,
   totalRounds,
   place,
@@ -93,6 +100,7 @@ function TeamMonitorCard({
   players: Player[];
   progress: TeamProgress | undefined;
   rounds: RoundConfig[];
+  points: number;
   wins: number;
   totalRounds: number;
   place: number;
@@ -119,11 +127,11 @@ function TeamMonitorCard({
                   ? "🥉 3rd"
                   : `#${place}`}
           </div>
-          <div className="font-display text-2xl font-extrabold">
-            {wins} <span className="text-xs opacity-60">/ {totalRounds}</span>
+          <div className="font-display text-2xl font-extrabold tabular-nums">
+            {formatPoints(points)}
           </div>
           <div className="text-[10px] opacity-50 uppercase tracking-wide">
-            round wins
+            pts · {wins} {wins === 1 ? "win" : "wins"} / {totalRounds}
           </div>
         </div>
       </div>

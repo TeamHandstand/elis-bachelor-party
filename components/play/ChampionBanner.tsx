@@ -1,12 +1,13 @@
 "use client";
 
 import type { Team } from "@/lib/types";
+import { formatPoints } from "@/lib/scoring";
 
 interface Props {
   winner: Team | null;
   myTeamId: string | null;
   totalRounds: number;
-  winsByTeamId: Record<string, number>;
+  pointsByTeamId: Record<string, number>;
 }
 
 /**
@@ -17,9 +18,9 @@ export function ChampionBanner({
   winner,
   myTeamId,
   totalRounds,
-  winsByTeamId,
+  pointsByTeamId,
 }: Props) {
-  const winnerWins = winner ? winsByTeamId[winner.id] ?? 0 : 0;
+  const winnerPoints = winner ? pointsByTeamId[winner.id] ?? 0 : 0;
   const iWon = !!winner && !!myTeamId && winner.id === myTeamId;
 
   if (!winner) {
@@ -57,7 +58,8 @@ export function ChampionBanner({
         {winner.name.toUpperCase()}
       </div>
       <div className="text-sm uppercase tracking-widest opacity-90 mt-3 font-bold tabular-nums">
-        {winnerWins} of {totalRounds} rounds won
+        {formatPoints(winnerPoints)} pts · {totalRounds}{" "}
+        {totalRounds === 1 ? "round" : "rounds"}
       </div>
 
       <div className="mt-5">

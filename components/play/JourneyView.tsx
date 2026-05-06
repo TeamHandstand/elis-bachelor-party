@@ -26,6 +26,12 @@ import { Confetti } from "./Confetti";
 import { ChampionBanner } from "./ChampionBanner";
 import { RoundBreakdown, type BreakdownEntry } from "./RoundBreakdown";
 import { useCookieHost } from "@/lib/auth/use-cookie-host";
+import {
+  buildRankInputs,
+  formatPoints,
+  rankRound,
+} from "@/lib/scoring";
+import { ScoringExplainer } from "./ScoringExplainer";
 
 interface Props {
   code: string;
@@ -110,8 +116,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
   const totalRounds = event.rounds.length;
 
   // For each past / current-decided round, compute MY team's place using
-  // the same scoring as RoundResults (north uses smallest avg error, others
-  // use earliest completion). Medals: 1=🥇, 2=🥈, 3=🥉, 4+=💩.
+  // the shared scoring utility. Medals: 1=🥇, 2=🥈, 3=🥉, 4+=💩.
   function medalForPlace(place: number | null): string | null {
     if (place === null) return null;
     if (place === 1) return "🥇";
@@ -123,48 +128,13 @@ export function JourneyView({ code, myPlayerId }: Props) {
     if (!myTeamId) return null;
     const round = event!.rounds[roundIndex];
     if (!round) return null;
-    const teamIds = Object.keys(teams);
-    if (teamIds.length === 0) return null;
-    const scored = teamIds.map((tid) => {
-      const cur = progressMap[tid]?.[roundIndex];
-      return {
-        teamId: tid,
-        completedAt: cur?.completedAt ?? null,
-        value: cur?.value ?? 0,
-        guesses: cur?.guesses ?? [],
-      };
-    });
-    if (round.challenge === "north" || round.challenge === "time-guess") {
-      scored.sort((a, b) => {
-        const ag = a.guesses.length;
-        const bg = b.guesses.length;
-        if ((ag > 0) !== (bg > 0)) return ag > 0 ? -1 : 1;
-        if (ag === 0 && bg === 0) return 0;
-        const aAvg = a.guesses.reduce((s, g) => s + g.errorDeg, 0) / ag;
-        const bAvg = b.guesses.reduce((s, g) => s + g.errorDeg, 0) / bg;
-        return aAvg - bAvg;
-      });
-    } else if (round.challenge === "trivia") {
-      scored.sort((a, b) => {
-        const aDone = a.completedAt !== null;
-        const bDone = b.completedAt !== null;
-        if (aDone !== bDone) return aDone ? -1 : 1;
-        if (a.value !== b.value) return b.value - a.value;
-        return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
-      });
-    } else {
-      scored.sort((a, b) => {
-        const aDone = a.completedAt !== null;
-        const bDone = b.completedAt !== null;
-        if (aDone !== bDone) return aDone ? -1 : 1;
-        if (aDone && bDone) {
-          return (a.completedAt ?? Infinity) - (b.completedAt ?? Infinity);
-        }
-        return b.value - a.value;
-      });
-    }
-    const idx = scored.findIndex((s) => s.teamId === myTeamId);
-    return idx >= 0 ? idx + 1 : null;
+    if (teamList.length === 0) return null;
+    const winnerForRound =
+      event!.roundWinners[roundIndex]?.teamId ?? null;
+    const inputs = buildRankInputs(teamList, progressMap, roundIndex);
+    const ranked = rankRound(round.challenge, inputs, winnerForRound);
+    const me = ranked.find((r) => r.team.id === myTeamId);
+    return me ? me.rank : null;
   }
 
   const cards: Array<{
@@ -351,8 +321,8 @@ export function JourneyView({ code, myPlayerId }: Props) {
             }
             myTeamId={myTeamId}
             totalRounds={totalRounds}
-            winsByTeamId={Object.fromEntries(
-              standings.map((s) => [s.team.id, s.wins]),
+            pointsByTeamId={Object.fromEntries(
+              standings.map((s) => [s.team.id, s.points]),
             )}
           />
         ) : (
@@ -369,8 +339,8 @@ export function JourneyView({ code, myPlayerId }: Props) {
           <div className="mt-2">
             <EndHeptathlonControls
               teams={teamList}
-              winsByTeamId={Object.fromEntries(
-                standings.map((s) => [s.team.id, s.wins]),
+              pointsByTeamId={Object.fromEntries(
+                standings.map((s) => [s.team.id, s.points]),
               )}
               onEnd={handleEndEvent}
               releaseMode={pendingRelease}
@@ -388,10 +358,13 @@ export function JourneyView({ code, myPlayerId }: Props) {
           </Link>
         )}
 
-        {/* Round-wins standings */}
+        {/* Standings — Olympic-style points across decided rounds. */}
         <div className="rounded-2xl bg-bg-card p-3 mt-2">
-          <div className="text-[10px] uppercase tracking-widest opacity-60 mb-1 font-bold">
-            Standings · {event.roundWinners.length}/{totalRounds} rounds
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[10px] uppercase tracking-widest opacity-60 font-bold">
+              Standings · {event.roundWinners.length}/{totalRounds} rounds
+            </div>
+            <ScoringExplainer teamCount={standings.length} />
           </div>
           {standings.map((row, i) => {
             const medals = ["🥇", "🥈", "🥉"];
@@ -408,7 +381,8 @@ export function JourneyView({ code, myPlayerId }: Props) {
                   {isMe ? " (us)" : ""}
                 </span>
                 <span className="font-bold tabular-nums">
-                  {row.wins} {row.wins === 1 ? "win" : "wins"}
+                  {formatPoints(row.points)}{" "}
+                  {row.points === 1 ? "pt" : "pts"}
                 </span>
               </div>
             );
