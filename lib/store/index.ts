@@ -213,6 +213,33 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         break;
       }
 
+      case "selfie-step": {
+        const teamProg = state.progress[msg.teamId];
+        if (!teamProg) return;
+        const next: TeamProgress = { ...teamProg };
+        const cur = ensureCell(next, msg.roundIndex);
+        // Idempotent: only advances; absorbs duplicate sends from teammates
+        // that all detected the same sustained match at once.
+        const newValue = Math.max(cur.value, msg.facesDone);
+        const justFinished = !cur.completed && newValue >= msg.total;
+        if (newValue === cur.value && !justFinished) break;
+        next[msg.roundIndex] = {
+          ...cur,
+          value: newValue,
+          completed: cur.completed || justFinished,
+          completedAt: cur.completed
+            ? cur.completedAt
+            : justFinished
+              ? msg.ts
+              : cur.completedAt,
+        };
+        set({
+          progress: { ...state.progress, [msg.teamId]: next },
+        });
+        get().recomputeCompletion(msg.teamId);
+        break;
+      }
+
       case "trivia-pick": {
         const teamProg = state.progress[msg.teamId];
         if (!teamProg) return;
