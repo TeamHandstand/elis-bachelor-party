@@ -67,7 +67,7 @@ function thresholdLabel(challenge: ChallengeId, threshold: number): string {
     case "tilt-maze":
       return `${threshold} mazes`;
     case "selfie-sync":
-      return `${threshold}s sustained`;
+      return `${threshold} face race`;
     case "punishment":
       return "non-scoring";
   }

@@ -165,13 +165,15 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
     id: "selfie-sync",
     label: "Selfie Sync",
     emoji: "😱",
-    // sustained seconds of all-three-faces-matching the target expression.
-    defaultThreshold: 5,
-    unit: "sec sustained",
-    aggregation: "all-simultaneous",
+    // Number of target faces the team must hit in sequence. Each face advances
+    // when all teammates' expression match crosses threshold simultaneously
+    // for ~1s. Round = race; fastest to clear all N faces wins.
+    defaultThreshold: 7,
+    unit: "faces",
+    aggregation: "team-total",
     description:
-      "All teammates make the same target face simultaneously for the target seconds.",
-    formatProgress: (v, t) => `${v.toFixed(0)}s / ${t}s`,
+      "Race! Make 7 target faces in a row as a team — all teammates sync each face. Fastest team wins.",
+    formatProgress: (v, t) => `${Math.min(Math.floor(v), t)} / ${t} faces`,
   },
   punishment: {
     id: "punishment",
@@ -234,7 +236,7 @@ export function challengeCommand(id: ChallengeId, threshold: number): string {
     case "tilt-maze":
       return `Tilt your way through ${threshold} mazes — pass the phone, race the others!`;
     case "selfie-sync":
-      return `All teammates: same face, simultaneously, for ${threshold} seconds!`;
+      return `Race! Sync ${threshold} target faces as a team — fastest wins!`;
     case "punishment":
       return `Losing team — your time has come.`;
   }

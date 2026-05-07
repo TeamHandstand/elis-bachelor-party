@@ -2,8 +2,9 @@
 // to (a) what to show the player and (b) a scorer that takes a blendshape
 // map (0..1 per shape) and returns a 0..1 match value. The view renders the
 // match value as a live feedback bar; when ALL teammates' match values are
-// >= MATCH_THRESHOLD simultaneously for the round's sustain seconds, the
-// challenge completes.
+// >= MATCH_THRESHOLD simultaneously briefly, the team advances to the next
+// face in the round's deterministic sequence. Round completes when all N
+// faces in the sequence have been hit. Fastest team wins.
 //
 // The set is curated to be drunk-friendly: large, easily-asymmetric face
 // muscles (smile, mouth open, brow up). Wink is included for the meme.
@@ -84,17 +85,40 @@ export const EXPRESSIONS: Expression[] = [
   },
 ];
 
-export function expressionForRound(
-  eventCode: string,
-  roundIndex: number,
-): Expression {
-  // Stable hash of code + round index so every device picks the same
-  // expression without needing to coordinate. Plain DJB2 over the bytes.
-  const seed = `${eventCode}::${roundIndex}`;
+function djb2(seed: string): number {
   let h = 5381;
   for (let i = 0; i < seed.length; i++) {
     h = (h * 33) ^ seed.charCodeAt(i);
   }
-  const idx = Math.abs(h) % EXPRESSIONS.length;
-  return EXPRESSIONS[idx];
+  return Math.abs(h) || 1;
+}
+
+/**
+ * Deterministic sequence of `count` expressions for a given round. Same
+ * (eventCode, roundIndex) → same sequence on every device, so all teammates
+ * see the same target faces in the same order without coordination.
+ *
+ * No two adjacent faces are the same — keeps the round from feeling like
+ * "hold one face for ages" if RNG would otherwise repeat.
+ */
+export function expressionsForRound(
+  eventCode: string,
+  roundIndex: number,
+  count: number,
+): Expression[] {
+  let state = djb2(`${eventCode}::${roundIndex}::seq`);
+  const next = (): number => {
+    // Numerical Recipes LCG: cheap, deterministic, good enough for picks.
+    state = (Math.imul(state, 1103515245) + 12345) | 0;
+    return state >>> 0;
+  };
+  const out: Expression[] = [];
+  let lastIdx = -1;
+  for (let i = 0; i < count; i++) {
+    let idx = next() % EXPRESSIONS.length;
+    if (idx === lastIdx) idx = (idx + 1) % EXPRESSIONS.length;
+    out.push(EXPRESSIONS[idx]);
+    lastIdx = idx;
+  }
+  return out;
 }

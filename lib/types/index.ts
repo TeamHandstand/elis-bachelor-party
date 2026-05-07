@@ -25,9 +25,9 @@ export type ChallengeId =
   // cleared maze contributes 1 toward the team-total threshold. Players
   // pass the phone after each level (anti-hog: front-cam face must change).
   | "tilt-maze"
-  // All teammates make the same target facial expression simultaneously
-  // (front camera + face-landmark blendshapes) for a sustained number of
-  // seconds. Same all-simultaneous shape as scream/shake.
+  // Race to clear N target faces in sequence (front camera + face-landmark
+  // blendshapes). Each face advances when all teammates' expression match
+  // crosses threshold simultaneously for ~1s. Fastest team to N wins.
   | "selfie-sync"
   // Not really a challenge — a "punishment line" the host drops between
   // rounds. When live, the team currently in last place gets called out on a
@@ -82,6 +82,23 @@ export interface LiveLevelMsg {
   // scream → dB, shake → |accel − g|, selfie-sync → 0..1 expression match.
   challenge: "scream" | "shake" | "selfie-sync";
   level: number;
+  // For selfie-sync: which face in the round's sequence the publisher is
+  // currently on. Teammates use this to decide whether a peer's level applies
+  // to "the face I'm waiting on" or has moved past it.
+  faceIndex?: number;
+  ts: number;
+}
+
+// Selfie Sync: team has reached `facesDone` of `total` target faces this
+// round. Sent by whichever device first detects the sustained match for the
+// face currently in progress; receivers max-merge so duplicate sends from
+// teammates are absorbed.
+export interface SelfieStepMsg {
+  kind: "selfie-step";
+  teamId: string;
+  roundIndex: number;
+  facesDone: number;
+  total: number;
   ts: number;
 }
 
@@ -206,6 +223,7 @@ export type ProgressMsg =
   | LiveLevelMsg
   | NorthGuessMsg
   | CompleteMsg
+  | SelfieStepMsg
   | TriviaPickMsg
   | TriviaSubmitMsg
   | EventStateMsg

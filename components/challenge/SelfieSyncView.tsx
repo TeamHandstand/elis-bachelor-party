@@ -6,7 +6,7 @@ import { useTeammates } from "@/lib/store/selectors";
 import { usePublisher } from "@/lib/store/bootstrap";
 import { CHALLENGES } from "@/lib/challenges";
 import {
-  expressionForRound,
+  expressionsForRound,
   type Expression,
 } from "@/lib/challenges/selfie-expressions";
 import {
@@ -23,6 +23,11 @@ interface Props {
 
 const PUBLISH_INTERVAL_MS = 250;
 const MATCH_THRESHOLD = 0.5; // a "good enough" match for a teammate
+// Each face must be sustained for this long by the whole team before advancing.
+// Short on purpose — players are racing through 7 of them.
+const PER_FACE_SUSTAIN_MS = 800;
+// A teammate's last published level is "live" if it landed this recently.
+const LIVE_WINDOW_MS = 1500;
 
 async function requestCameraPerm(): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia)
@@ -63,26 +68,56 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
   const event = useToastyStore((s) => s.event);
   const myProgress = useToastyStore((s) => s.getMyTeamProgress());
 
-  const expression: Expression = useMemo(
-    () => expressionForRound(code, roundIndex),
-    [code, roundIndex],
+  const def = CHALLENGES["selfie-sync"];
+  const totalFaces =
+    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
+
+  const expressions: Expression[] = useMemo(
+    () => expressionsForRound(code, roundIndex, totalFaces),
+    [code, roundIndex, totalFaces],
   );
 
-  const def = CHALLENGES["selfie-sync"];
-  const threshold =
-    event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold;
+  // Number of faces the team has cleared in this round, synced through
+  // SelfieStepMsg → store. All teammates derive the current target from this.
+  const facesDone = Math.min(
+    myProgress?.[roundIndex]?.value ?? 0,
+    totalFaces,
+  );
   const teamCompleted = !!myProgress?.[roundIndex]?.completed;
+  const currentExpression =
+    expressions[Math.min(facesDone, expressions.length - 1)] ?? null;
+  const upcomingExpression = expressions[facesDone + 1] ?? null;
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [myLevel, setMyLevel] = useState(0);
   const [modelReady, setModelReady] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [completeSent, setCompleteSent] = useState(false);
 
   const lastLevelRef = useRef(0);
   const lastPublishRef = useRef(0);
   const sustainedStartRef = useRef<number | null>(null);
+  // Highest facesDone we've already broadcast a step for. Prevents the same
+  // device from re-sending the same step while waiting for the message to
+  // round-trip back and bump our local facesDone.
+  const lastSentStepRef = useRef(0);
+  // Mirrors `facesDone` for the rAF loop, which captures stale closures.
+  const facesDoneRef = useRef(facesDone);
+  // Mirrors `currentExpression` for the rAF loop similarly.
+  const currentExprRef = useRef<Expression | null>(currentExpression);
+
+  useEffect(() => {
+    facesDoneRef.current = facesDone;
+    currentExprRef.current = currentExpression;
+    // Reset the sustain timer whenever the team advances to a new face —
+    // we need fresh sustained-match coverage for the new target.
+    sustainedStartRef.current = null;
+    // If progress went backwards (host round-reset re-running this round),
+    // unblock our own send dedupe so we can advance again.
+    if (facesDone < lastSentStepRef.current) {
+      lastSentStepRef.current = facesDone;
+    }
+  }, [facesDone, currentExpression]);
 
   // Acquire the camera, attach to <video>, and run the detection loop.
   useEffect(() => {
@@ -160,7 +195,9 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
         try {
           const result = landmarker!.detectForVideo(v, ts);
           const blends = blendshapesByName(result);
-          const match = expression.score(blends);
+          const expr = currentExprRef.current;
+          const faceIdx = facesDoneRef.current;
+          const match = expr ? expr.score(blends) : 0;
           lastLevelRef.current = match;
           setMyLevel(match);
 
@@ -174,6 +211,7 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
               roundIndex,
               challenge: "selfie-sync",
               level: match,
+              faceIndex: faceIdx,
               ts: now,
             }).catch(() => {});
           }
@@ -195,34 +233,45 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
       }
       streamRef.current = null;
     };
-  }, [myPlayerId, myTeamId, roundIndex, publisher, expression]);
+  }, [myPlayerId, myTeamId, roundIndex, publisher]);
 
-  // Detect "all teammates above MATCH_THRESHOLD sustained for `threshold` sec".
+  // Detect "all teammates above MATCH_THRESHOLD on the CURRENT face for
+  // PER_FACE_SUSTAIN_MS". When met, broadcast a selfie-step bumping
+  // facesDone — every teammate's store updates and they all flip to the
+  // next face together.
   useEffect(() => {
-    if (!myTeamId || teamCompleted || completeSent) return;
+    if (!myTeamId || teamCompleted) return;
+    if (facesDone >= totalFaces) return;
     const interval = setInterval(() => {
       const now = Date.now();
-      const recentOk = (lvl?: { level: number; ts: number }) =>
-        !!lvl && now - lvl.ts < 1500 && lvl.level >= MATCH_THRESHOLD;
-
       const me = lastLevelRef.current >= MATCH_THRESHOLD;
       const others = teammates.filter((p) => p.id !== myPlayerId);
-      const allOthers = others.every((p) =>
-        recentOk(liveLevels[p.id]?.["selfie-sync"]),
-      );
+      const allOthers = others.every((p) => {
+        const lvl = liveLevels[p.id]?.["selfie-sync"];
+        if (!lvl || now - lvl.ts > LIVE_WINDOW_MS) return false;
+        const theirFace = lvl.faceIndex ?? 0;
+        // They've already advanced past the face I'm waiting on — count them.
+        if (theirFace > facesDone) return true;
+        // They're behind — block until they catch up to my face.
+        if (theirFace < facesDone) return false;
+        return lvl.level >= MATCH_THRESHOLD;
+      });
       const allMatch = me && (others.length === 0 || allOthers);
 
       if (allMatch) {
         if (sustainedStartRef.current === null) {
           sustainedStartRef.current = now;
-        } else if (now - sustainedStartRef.current >= threshold * 1000) {
-          if (!completeSent) {
-            setCompleteSent(true);
+        } else if (now - sustainedStartRef.current >= PER_FACE_SUSTAIN_MS) {
+          const nextStep = facesDone + 1;
+          if (nextStep > lastSentStepRef.current) {
+            lastSentStepRef.current = nextStep;
+            sustainedStartRef.current = null;
             publisher({
-              kind: "complete",
+              kind: "selfie-step",
               teamId: myTeamId,
               roundIndex,
-              challenge: "selfie-sync",
+              facesDone: nextStep,
+              total: totalFaces,
               ts: now,
             }).catch(() => {});
           }
@@ -230,16 +279,16 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
       } else {
         sustainedStartRef.current = null;
       }
-    }, 200);
+    }, 150);
     return () => clearInterval(interval);
   }, [
     myTeamId,
     teammates,
     liveLevels,
     myPlayerId,
-    threshold,
+    totalFaces,
     teamCompleted,
-    completeSent,
+    facesDone,
     publisher,
     roundIndex,
   ]);
@@ -248,9 +297,12 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
   const meAbove = myLevel >= MATCH_THRESHOLD;
   const othersInfo = others.map((p) => {
     const lvl = liveLevels[p.id]?.["selfie-sync"];
-    const recent = !!lvl && Date.now() - lvl.ts < 1500;
-    const v = recent ? lvl?.level ?? 0 : 0;
-    return { player: p, level: v, ok: recent && v >= MATCH_THRESHOLD };
+    const recent = !!lvl && Date.now() - lvl.ts < LIVE_WINDOW_MS;
+    const theirFace = lvl?.faceIndex ?? 0;
+    const ahead = recent && theirFace > facesDone;
+    const v = recent && theirFace === facesDone ? lvl?.level ?? 0 : 0;
+    const ok = ahead || (recent && v >= MATCH_THRESHOLD);
+    return { player: p, level: ahead ? 1 : v, ok };
   });
   const allMatch =
     meAbove && (others.length === 0 || othersInfo.every((o) => o.ok));
@@ -261,28 +313,44 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
   return (
     <div
       className={`flex flex-col flex-1 p-3 transition-colors ${
-        allMatch ? "bg-accent-pink/30 animate-pulse" : ""
+        allMatch && !teamCompleted ? "bg-accent-pink/30 animate-pulse" : ""
       }`}
     >
       <div className="text-center mb-2">
         <div className="text-[11px] uppercase tracking-widest opacity-60">
-          target expression
+          {teamCompleted
+            ? `all ${totalFaces} faces — done!`
+            : `face ${Math.min(facesDone + 1, totalFaces)} / ${totalFaces}`}
         </div>
-        <div className="font-display text-2xl font-extrabold flex items-center justify-center gap-2">
-          <span className="text-3xl">{expression.emoji}</span>
-          <span className="text-accent-orange">{expression.label}</span>
-        </div>
-        <div className="text-[11px] opacity-70 mt-0.5">{expression.hint}</div>
+        {currentExpression && !teamCompleted ? (
+          <>
+            <div className="font-display text-2xl font-extrabold flex items-center justify-center gap-2">
+              <span className="text-3xl">{currentExpression.emoji}</span>
+              <span className="text-accent-orange">
+                {currentExpression.label}
+              </span>
+            </div>
+            <div className="text-[11px] opacity-70 mt-0.5">
+              {currentExpression.hint}
+            </div>
+          </>
+        ) : (
+          <div className="font-display text-2xl font-extrabold text-accent-pink">
+            PERFECT FACES, ALL OF YOU 💋
+          </div>
+        )}
         <div className="text-xs mt-1 font-bold">
           {teamCompleted
-            ? "PERFECT FACES, ALL OF YOU 💋"
+            ? "fastest team wins!"
             : allMatch
-              ? `HOLD IT! ${sustainedSecs.toFixed(1)}s / ${threshold}s`
-              : `all ${teammates.length || 1} teammates · ${threshold}s sustained`}
+              ? `HOLD IT! ${sustainedSecs.toFixed(1)}s`
+              : `all ${teammates.length || 1} teammates · sync to advance`}
         </div>
       </div>
 
-      <div className="relative mx-auto w-full max-w-xs aspect-[4/3] rounded-2xl overflow-hidden bg-bg-deep">
+      <FaceProgressDots done={facesDone} total={totalFaces} />
+
+      <div className="relative mx-auto w-full max-w-xs aspect-[4/3] rounded-2xl overflow-hidden bg-bg-deep mt-2">
         <video
           ref={videoRef}
           playsInline
@@ -306,15 +374,16 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
             meAbove ? "ring-accent-orange" : "ring-transparent"
           }`}
         />
+        {upcomingExpression && !teamCompleted && (
+          <div className="absolute bottom-2 right-2 bg-bg-deep/80 rounded-xl px-2 py-1 text-[10px] font-bold flex items-center gap-1">
+            <span className="opacity-60">next</span>
+            <span className="text-base">{upcomingExpression.emoji}</span>
+          </div>
+        )}
       </div>
 
       <div className="mt-3">
-        <MatchBar
-          label="YOU"
-          level={myLevel}
-          big
-          highlight={meAbove}
-        />
+        <MatchBar label="YOU" level={myLevel} big highlight={meAbove} />
       </div>
 
       {others.length > 0 && (
@@ -331,6 +400,27 @@ function SelfieSyncChallenge({ code, myPlayerId, roundIndex }: Props) {
       )}
     </div>
   );
+}
+
+function FaceProgressDots({ done, total }: { done: number; total: number }) {
+  const dots: React.ReactNode[] = [];
+  for (let i = 0; i < total; i++) {
+    const isDone = i < done;
+    const isCurrent = i === done;
+    dots.push(
+      <div
+        key={i}
+        className={`flex-1 h-2 rounded-full transition-colors ${
+          isDone
+            ? "bg-accent-green"
+            : isCurrent
+              ? "bg-accent-orange animate-pulse"
+              : "bg-bg-card"
+        }`}
+      />,
+    );
+  }
+  return <div className="flex gap-1 px-1">{dots}</div>;
 }
 
 function MatchBar({
