@@ -65,16 +65,29 @@ export default function JoinPage() {
     return pool.length > 0 ? [...teamGroups, { team: null, roster: pool }] : teamGroups;
   }, [eventData]);
 
-  function continueToLobby() {
+  // Once an event has left the lobby, send returning players (and people
+  // logging in as someone already on the roster) straight to the journey —
+  // /lobby has no useful UI for active or finished events and would just
+  // bounce again, sometimes getting stuck on finished events that the user
+  // wants to review.
+  function destinationForStatus(): string {
+    const status = eventData?.event.status;
+    if (status === "active" || status === "finished") {
+      return `/e/${code}/play`;
+    }
+    return `/e/${code}/lobby`;
+  }
+
+  function handleContinue() {
     if (!savedPlayer) return;
-    router.replace(`/e/${code}/lobby`);
+    router.replace(destinationForStatus());
   }
 
   function pickExisting(player: Player) {
     if (typeof window === "undefined") return;
     localStorage.setItem(`toasty-player-id-${code}`, player.id);
     setSavedPlayerId(player.id);
-    router.replace(`/e/${code}/lobby`);
+    router.replace(destinationForStatus());
   }
 
   async function submit(e: React.FormEvent) {
@@ -136,7 +149,7 @@ export default function JoinPage() {
             </div>
             <button
               type="button"
-              onClick={continueToLobby}
+              onClick={handleContinue}
               className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest"
             >
               CONTINUE 🔥
