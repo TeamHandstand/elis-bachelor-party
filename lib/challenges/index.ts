@@ -70,7 +70,7 @@ export const CHALLENGES: Record<ChallengeId, ChallengeDef> = {
   },
   north: {
     id: "north",
-    label: "Due North",
+    label: "True North",
     emoji: "🧭",
     // Threshold is unused for north — every teammate gets exactly one guess
     // and the team's score is the average angular error. Stored as 0 by

@@ -45,6 +45,10 @@ function formatPerPlayer(challenge: ChallengeId, value: number): string {
       return `${Math.floor(value)} faces`;
     case "interleave":
       return `${Math.floor(value).toLocaleString()}`;
+    case "north":
+      return `${value.toFixed(0)}°`;
+    case "time-guess":
+      return `±${(value / 1000).toFixed(2)}s`;
     default:
       return Math.floor(value).toLocaleString();
   }
@@ -65,6 +69,20 @@ function challengeHasPerPlayerBreakdown(challenge: ChallengeId): boolean {
     default:
       return false;
   }
+}
+
+// north / time-guess store per-player results in `guesses` (errorDeg) rather
+// than `perPlayer`. Project them into the same [playerId, value][] shape so
+// the row renderer can treat both code paths uniformly.
+function perPlayerFromGuesses(
+  challenge: ChallengeId,
+  entry: BreakdownEntry,
+): Array<[string, number]> {
+  if (challenge !== "north" && challenge !== "time-guess") return [];
+  const guesses = entry.guesses ?? [];
+  return guesses
+    .map((g) => [g.playerId, g.errorDeg] as [string, number])
+    .sort((a, b) => a[1] - b[1]);
 }
 
 function formatTime(ms: number | null): string {
@@ -151,10 +169,13 @@ export function RoundBreakdown({
         if (!entry) return null;
         const isMine = entry.team.id === myTeamId;
         const isWinner = entry.team.id === winnerTeamId;
+        const guessEntries = perPlayerFromGuesses(challenge, entry);
         const perPlayerEntries =
-          showPerPlayer && entry.perPlayer
-            ? Object.entries(entry.perPlayer).sort((a, b) => b[1] - a[1])
-            : [];
+          guessEntries.length > 0
+            ? guessEntries
+            : showPerPlayer && entry.perPlayer
+              ? Object.entries(entry.perPlayer).sort((a, b) => b[1] - a[1])
+              : [];
         return (
           <div
             key={entry.team.id}

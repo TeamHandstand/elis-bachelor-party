@@ -75,7 +75,7 @@ const STEPS: Step[] = [
     id: "orientation",
     label: "Compass",
     emoji: "🧭",
-    blurb: "For Due North + spin counting.",
+    blurb: "For True North + spin counting.",
     request: requestOrientation,
   },
   {
