@@ -75,6 +75,50 @@ function rankBadge(rank: number): string {
   return `#${rank}`;
 }
 
+function formatPerPlayer(challenge: ChallengeId, value: number): string {
+  switch (challenge) {
+    case "distance":
+      return `${(value / 1609).toFixed(2)} mi`;
+    case "flappy":
+      return `${Math.floor(value)} m`;
+    case "air-time":
+      return `${value.toFixed(1)}s`;
+    case "spin":
+      return `${Math.floor(value).toLocaleString()} spin${
+        Math.floor(value) === 1 ? "" : "s"
+      }`;
+    case "steps":
+      return `${Math.floor(value).toLocaleString()} steps`;
+    case "taps":
+      return `${Math.floor(value).toLocaleString()} taps`;
+    case "tilt-maze":
+      return `${Math.floor(value)} lvls`;
+    case "selfie-sync":
+      return `${Math.floor(value)} faces`;
+    case "interleave":
+      return `${Math.floor(value).toLocaleString()}`;
+    default:
+      return Math.floor(value).toLocaleString();
+  }
+}
+
+function challengeHasPerPlayerBreakdown(challenge: ChallengeId): boolean {
+  switch (challenge) {
+    case "distance":
+    case "steps":
+    case "taps":
+    case "spin":
+    case "interleave":
+    case "flappy":
+    case "air-time":
+    case "tilt-maze":
+    case "selfie-sync":
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function RoundResults({
   challenge,
   threshold,
@@ -317,6 +361,10 @@ function MyTeamCard({
   // Accumulator / scream / shake — show completion time prominently.
   const ms = timeTaken(entry, roundStartedAt);
   const valueLabel = def.formatProgress(entry.value, threshold);
+  const showPerPlayer =
+    challengeHasPerPlayerBreakdown(challenge) &&
+    entry.perPlayer &&
+    Object.keys(entry.perPlayer).length > 0;
   return (
     <div className="flex flex-col items-center justify-center flex-1 p-6 bg-gradient-done text-white text-center">
       <div className="text-xs uppercase tracking-[0.3em] opacity-90 mb-2">
@@ -331,6 +379,26 @@ function MyTeamCard({
       <div className="mt-4 px-4 py-2 rounded-2xl bg-black/20 text-sm font-bold tabular-nums">
         {def.emoji} {valueLabel}
       </div>
+      {showPerPlayer && (
+        <div className="mt-4 w-full max-w-xs space-y-1">
+          <div className="text-[10px] uppercase tracking-widest opacity-80 mb-1">
+            who did what
+          </div>
+          {Object.entries(entry.perPlayer ?? {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([pid, v]) => (
+              <div
+                key={pid}
+                className="flex justify-between text-sm tabular-nums bg-black/20 rounded-lg px-3 py-1.5"
+              >
+                <span className="truncate">{players[pid]?.name ?? "?"}</span>
+                <span className="font-bold">
+                  {formatPerPlayer(challenge, v)}
+                </span>
+              </div>
+            ))}
+        </div>
+      )}
       <div className="mt-6 text-[11px] opacity-90 max-w-xs">
         nice work. host will end the round once they’re ready.
       </div>
@@ -467,6 +535,27 @@ function TeamResultRow({
           ))}
         </div>
       )}
+      {challengeHasPerPlayerBreakdown(challenge) &&
+        entry.perPlayer &&
+        Object.keys(entry.perPlayer).length > 0 && (
+          <div className="mt-2 grid grid-cols-2 gap-1">
+            {Object.entries(entry.perPlayer)
+              .sort((a, b) => b[1] - a[1])
+              .map(([pid, v]) => (
+                <div
+                  key={pid}
+                  className="text-[10px] tabular-nums bg-black/20 rounded px-2 py-1 flex justify-between gap-2"
+                >
+                  <span className="truncate">
+                    {players[pid]?.name ?? "?"}
+                  </span>
+                  <span className="font-bold whitespace-nowrap">
+                    {formatPerPlayer(challenge, v)}
+                  </span>
+                </div>
+              ))}
+          </div>
+        )}
       {challenge === "trivia" &&
         triviaQuestions &&
         triviaQuestions.length > 0 &&
