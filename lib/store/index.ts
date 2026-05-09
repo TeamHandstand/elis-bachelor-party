@@ -53,8 +53,19 @@ export interface ToastyStore {
   // progress, indexed by team -> round index
   progress: Record<string /*teamId*/, TeamProgress>;
 
-  // ephemeral live levels for scream/shake/selfie-sync (last sample per player)
-  liveLevels: Record<string /*playerId*/, Partial<Record<"scream" | "shake" | "selfie-sync", { level: number; ts: number }>>>;
+  // ephemeral live levels for scream/shake/selfie-sync (last sample per player).
+  // selfie-sync also carries `faceIndex` so teammates can tell whether a
+  // peer's match score applies to the face this device is still working on or
+  // a later one they've already cleared.
+  liveLevels: Record<
+    string /*playerId*/,
+    Partial<
+      Record<
+        "scream" | "shake" | "selfie-sync",
+        { level: number; ts: number; faceIndex?: number }
+      >
+    >
+  >;
 
   // ---- actions ----
   bootstrap(args: {
@@ -168,7 +179,11 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
 
       case "live": {
         const playerLevels = { ...(state.liveLevels[msg.playerId] ?? {}) };
-        playerLevels[msg.challenge] = { level: msg.level, ts: msg.ts };
+        playerLevels[msg.challenge] = {
+          level: msg.level,
+          ts: msg.ts,
+          ...(msg.faceIndex !== undefined ? { faceIndex: msg.faceIndex } : {}),
+        };
         set({
           liveLevels: { ...state.liveLevels, [msg.playerId]: playerLevels },
         });
