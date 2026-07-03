@@ -65,16 +65,23 @@ export default function JoinPage() {
     return pool.length > 0 ? [...teamGroups, { team: null, roster: pool }] : teamGroups;
   }, [eventData]);
 
+  // Open-play events skip the lobby and go straight to the self-paced games hub.
+  function landingRoute() {
+    return eventData?.event.mode === "open"
+      ? `/e/${code}/games`
+      : `/e/${code}/lobby`;
+  }
+
   function continueToLobby() {
     if (!savedPlayer) return;
-    router.replace(`/e/${code}/lobby`);
+    router.replace(landingRoute());
   }
 
   function pickExisting(player: Player) {
     if (typeof window === "undefined") return;
     localStorage.setItem(`toasty-player-id-${code}`, player.id);
     setSavedPlayerId(player.id);
-    router.replace(`/e/${code}/lobby`);
+    router.replace(landingRoute());
   }
 
   async function submit(e: React.FormEvent) {
@@ -101,7 +108,7 @@ export default function JoinPage() {
       }
       const data = (await res.json()) as JoinEventResponse;
       localStorage.setItem(`toasty-player-id-${code}`, data.player.id);
-      router.replace(`/e/${code}/lobby`);
+      router.replace(landingRoute());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t join");
       setBusy(false);

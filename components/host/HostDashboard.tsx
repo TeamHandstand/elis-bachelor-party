@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { GetEventResponse } from "@/lib/api/contract";
 import type { EventConfig, Player, Team } from "@/lib/types";
 import EventConfigPanel from "./EventConfigPanel";
+import OpenGamesPanel from "./OpenGamesPanel";
 import HostMonitor from "./HostMonitor";
 import HostPlayerPicker from "./HostPlayerPicker";
 import QrCard from "./QrCard";
@@ -50,6 +51,17 @@ export default function HostDashboard({ initial }: Props) {
       />
 
       <div className="max-w-6xl mx-auto px-4 mt-4">
+        {event.mode === "open" ? (
+          // Open play has no teams / trivia / live monitor — just the game
+          // list and the QR to join.
+          <div className="mt-1 grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-6">
+            <OpenGamesPanel event={event} onSaved={(e) => setEvent(e)} />
+            <div className="lg:order-2 order-first">
+              <QrCard code={event.code} />
+            </div>
+          </div>
+        ) : (
+        <>
         <Tabs tab={tab} setTab={setTab} status={event.status} />
 
         <div className="mt-5">
@@ -85,6 +97,8 @@ export default function HostDashboard({ initial }: Props) {
 
           {tab === "monitor" ? <HostMonitor code={event.code} /> : null}
         </div>
+        </>
+        )}
       </div>
     </main>
   );
@@ -122,24 +136,36 @@ function StickyHeader({
               {event.code}
             </span>
             <span>·</span>
-            <span>{players.length} players</span>
-            <span>·</span>
-            <span>{teams.length} teams</span>
-            <span>·</span>
-            <span>
-              {event.hostPlayerId ? (
-                <>
-                  host:{" "}
-                  <span className="text-accent-orange font-bold">
-                    👑{" "}
-                    {players.find((p) => p.id === event.hostPlayerId)?.name ??
-                      "?"}
-                  </span>
-                </>
-              ) : (
-                <span className="opacity-50">no host set</span>
-              )}
+            <span className="uppercase tracking-widest font-bold text-accent-purple">
+              {event.mode === "open" ? "🎮 open play" : "🏆 heptathlon"}
             </span>
+            <span>·</span>
+            <span>{players.length} players</span>
+            {event.mode !== "open" ? (
+              <>
+                <span>·</span>
+                <span>{teams.length} teams</span>
+              </>
+            ) : null}
+            {event.mode !== "open" ? (
+              <>
+                <span>·</span>
+                <span>
+                  {event.hostPlayerId ? (
+                    <>
+                      host:{" "}
+                      <span className="text-accent-orange font-bold">
+                        👑{" "}
+                        {players.find((p) => p.id === event.hostPlayerId)?.name ??
+                          "?"}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="opacity-50">no host set</span>
+                  )}
+                </span>
+              </>
+            ) : null}
             <span>·</span>
             <span>
               status:{" "}
@@ -166,11 +192,22 @@ function StickyHeader({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 items-start">
-          <StartButton event={event} players={players} onStarted={onEvent} />
-          <ResetButtons event={event} onReset={onReset} />
-          <EndButton event={event} teams={teams} onEnded={onEvent} />
-        </div>
+        {event.mode !== "open" ? (
+          <div className="flex flex-wrap gap-2 items-start">
+            <StartButton event={event} players={players} onStarted={onEvent} />
+            <ResetButtons event={event} onReset={onReset} />
+            <EndButton event={event} teams={teams} onEnded={onEvent} />
+          </div>
+        ) : (
+          <a
+            href={`/e/${event.code}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 rounded-xl bg-bg-deep border border-white/15 text-xs font-bold hover:border-accent-orange/60 self-center"
+          >
+            ↗ Open game
+          </a>
+        )}
       </div>
     </header>
   );

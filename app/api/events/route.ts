@@ -8,6 +8,7 @@ const BodySchema = z
   .object({
     title: z.string().max(120).optional(),
     groomName: z.string().max(120).optional(),
+    mode: z.enum(["heptathlon", "open"]).optional(),
   })
   .strict();
 

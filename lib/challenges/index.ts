@@ -279,6 +279,89 @@ export function defaultChallengeConfig(): RoundConfig[] {
   return defaultRounds();
 }
 
+// ---------------------------------------------------------------------------
+// Open Play — per-game single-attempt specs
+// ---------------------------------------------------------------------------
+//
+// Open Play turns a subset of challenges into one-shot, best-score games each
+// player plays once. Ranking direction, attempt duration, input mode, and the
+// sensor to wire up live here. Display label/emoji are reused from CHALLENGES.
+// The RoundConfig.threshold of an open game is reinterpreted as the attempt
+// duration in ms (so the host can tune it via the same config path).
+
+export interface OpenGameSpec {
+  gameId: ChallengeId;
+  // Ranking direction on the per-game leaderboard.
+  direction: "higher" | "lower";
+  // Default single-attempt duration in ms (stored per-round in threshold).
+  durationMs: number;
+  // How the attempt screen collects input.
+  //  - "tap-surface": a full-screen tap target (taps).
+  //  - "motion": a motion/orientation sensor running for the duration.
+  input: "tap-surface" | "motion";
+  // Which sensor class the play screen instantiates (client maps this).
+  sensor: "taps" | "steps" | "spin" | "air-time";
+  // Short imperative shown on the attempt screen.
+  instruction: string;
+  // Format the accumulated raw score for display.
+  formatScore: (score: number) => string;
+}
+
+export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
+  taps: {
+    gameId: "taps",
+    direction: "higher",
+    durationMs: 15000,
+    input: "tap-surface",
+    sensor: "taps",
+    instruction: "Tap the screen as fast as you can!",
+    formatScore: (s) => `${Math.floor(s).toLocaleString()} taps`,
+  },
+  steps: {
+    gameId: "steps",
+    direction: "higher",
+    durationMs: 30000,
+    input: "motion",
+    sensor: "steps",
+    instruction: "Run in place / walk — rack up as many steps as you can!",
+    formatScore: (s) => `${Math.floor(s).toLocaleString()} steps`,
+  },
+  spin: {
+    gameId: "spin",
+    direction: "higher",
+    durationMs: 20000,
+    input: "motion",
+    sensor: "spin",
+    instruction: "Spin in place — the more rotations the better!",
+    formatScore: (s) => `${(s / 360).toFixed(1)} spins`,
+  },
+  "air-time": {
+    gameId: "air-time",
+    direction: "higher",
+    durationMs: 30000,
+    input: "motion",
+    sensor: "air-time",
+    instruction: "Toss the phone (carefully!) — total seconds airborne wins.",
+    formatScore: (s) => `${s.toFixed(1)}s airborne`,
+  },
+};
+
+/** Whether a challenge is playable as an Open Play single-attempt game. */
+export function isOpenGame(id: ChallengeId): boolean {
+  return id in OPEN_GAMES;
+}
+
+/**
+ * Default game list for a freshly-created OPEN event: one of each supported
+ * open-play game, threshold seeded with its attempt duration (ms).
+ */
+export function defaultOpenGames(): RoundConfig[] {
+  return (Object.values(OPEN_GAMES) as OpenGameSpec[]).map((spec) => ({
+    challenge: spec.gameId,
+    threshold: spec.durationMs,
+  }));
+}
+
 /**
  * Convenience: just the ChallengeId of each round in order. Equivalent to
  * `event.rounds.map(r => r.challenge)` but handy when callers are forwarding

@@ -4,6 +4,7 @@
 import type {
   ChallengeId,
   EventConfig,
+  EventMode,
   EventStatus,
   Player,
   RoundConfig,
@@ -34,6 +35,7 @@ export interface ListEventsResponse {
     code: string;
     title: string;
     status: EventStatus;
+    mode: EventMode;
     createdAt: string;
     // Round state — used by the listing UI to render a LIVE/COUNTDOWN
     // indicator and (for active countdowns) auto-redirect into the event.
@@ -48,6 +50,8 @@ export interface ListEventsResponse {
 export interface CreateEventRequest {
   title?: string;
   groomName?: string;
+  // Which game mode to create. Defaults to 'heptathlon' when omitted.
+  mode?: EventMode;
 }
 export interface CreateEventResponse {
   event: EventConfig;
@@ -293,3 +297,41 @@ export interface UpdateTriviaPresetResponse {
   preset: TriviaPreset;
 }
 // DELETE /api/trivia-presets/:id  → { ok: true }
+
+// ---------- Open Play ----------
+
+// ---------- POST /api/events/:code/open/score ----------
+// Player submits their single-attempt score for one open-play game. Play-once:
+// a second submission for the same (player, game) returns 409 already-played.
+export interface SubmitOpenScoreRequest {
+  playerId: string;
+  gameId: ChallengeId;
+  score: number;
+  meta?: Record<string, unknown>;
+}
+export interface SubmitOpenScoreResponse {
+  ok: true;
+}
+
+// ---------- GET /api/events/:code/open/leaderboard ----------
+// Server-computed per-game and game-wide leaderboards for an open event.
+export interface OpenGameLeaderboardRow {
+  playerId: string;
+  name: string;
+  score: number;
+  scoreLabel: string; // formatted per the game's OpenGameSpec
+  rank: number; // 1-indexed
+  points: number; // placement points contributed by this game
+}
+export interface OpenGlobalStandingRow {
+  playerId: string;
+  name: string;
+  points: number; // total placement points across all games
+  gamesPlayed: number;
+}
+export interface OpenLeaderboardResponse {
+  totalPlayers: number;
+  games: Array<{ gameId: ChallengeId; label: string; emoji: string }>;
+  global: OpenGlobalStandingRow[];
+  perGame: Record<string, OpenGameLeaderboardRow[]>;
+}

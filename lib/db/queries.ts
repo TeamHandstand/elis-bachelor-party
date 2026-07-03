@@ -6,11 +6,13 @@ import {
   teams,
   players,
   finalProgress,
+  openScores,
   triviaPresets,
   type EventRow,
   type TeamRow,
   type PlayerRow,
   type FinalProgressRow,
+  type OpenScoreRow,
   type TriviaPresetRow,
 } from "./schema";
 import {
@@ -19,12 +21,15 @@ import {
   DEFAULT_PUNISHMENT_MESSAGE,
   coerceRounds,
   coerceTriviaQuestions,
+  defaultOpenGames,
   defaultRounds,
   interleaveTotal,
+  isOpenGame,
 } from "@/lib/challenges";
 import type {
   ChallengeId,
   EventConfig,
+  EventMode,
   EventStatus,
   Player,
   RoundConfig,
@@ -69,6 +74,7 @@ export function eventRowToConfig(row: EventRow): EventConfig {
     title: row.title,
     groomName: row.groomName,
     status: row.status as EventStatus,
+    mode: (row.mode as EventMode) ?? "heptathlon",
     rounds,
     createdAt: row.createdAt.toISOString(),
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
@@ -113,6 +119,7 @@ export async function listEvents(): Promise<
     code: string;
     title: string;
     status: EventStatus;
+    mode: EventMode;
     createdAt: string;
     currentRoundIndex: number | null;
     currentRoundStatus: RoundStatus | null;
@@ -125,6 +132,7 @@ export async function listEvents(): Promise<
       code: events.code,
       title: events.title,
       status: events.status,
+      mode: events.mode,
       createdAt: events.createdAt,
       currentRoundIndex: events.currentRoundIndex,
       currentRoundStatus: events.currentRoundStatus,
@@ -137,6 +145,7 @@ export async function listEvents(): Promise<
     code: r.code,
     title: r.title,
     status: r.status as EventStatus,
+    mode: (r.mode as EventMode) ?? "heptathlon",
     createdAt: r.createdAt.toISOString(),
     currentRoundIndex: r.currentRoundIndex,
     currentRoundStatus: (r.currentRoundStatus as RoundStatus | null) ?? null,
@@ -149,10 +158,14 @@ export async function listEvents(): Promise<
 export async function createEvent(input: {
   title?: string;
   groomName?: string;
+  mode?: EventMode;
 }): Promise<{ event: EventConfig; teams: Team[] }> {
   const title = input.title?.trim() || "Bachelor Party";
   const groomName = input.groomName?.trim() || "";
-  const rounds = defaultRounds();
+  const mode: EventMode = input.mode === "open" ? "open" : "heptathlon";
+  // Open events default to one of each supported open-play game; heptathlon
+  // events default to the full round list.
+  const rounds = mode === "open" ? defaultOpenGames() : defaultRounds();
 
   // Try up to 5 times to avoid rare code collisions.
   let lastErr: unknown = null;
@@ -165,6 +178,7 @@ export async function createEvent(input: {
           code,
           title,
           groomName,
+          mode,
           challenges: rounds,
         })
         .returning();
@@ -344,6 +358,7 @@ export async function duplicateEvent(input: {
           code,
           title: newTitle,
           groomName: source.groomName,
+          mode: source.mode,
           challenges: source.challenges,
           status: "lobby",
         })
@@ -801,6 +816,105 @@ export async function getEventProgress(code: string): Promise<Array<{
     value: Number(r.value),
     completed: r.completed,
     completedAt: r.completedAt ? r.completedAt.getTime() : null,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Open Play — per-player, per-game scores.
+// ---------------------------------------------------------------------------
+
+/**
+ * Record a player's single-attempt score for an open-play game. The PK
+ * (event_id, player_id, game_id) enforces play-once: ON CONFLICT DO NOTHING
+ * means a second attempt is rejected without overwriting the first. Returns
+ * `inserted: false` (plus the existing row) when the player already has a score.
+ */
+export async function submitOpenScore(input: {
+  code: string;
+  playerId: string;
+  gameId: string;
+  score: number;
+  meta?: Record<string, unknown>;
+}): Promise<
+  | { ok: true; inserted: boolean; row: OpenScoreRow }
+  | { error: "not-found" | "player-not-in-event" | "unknown-game" }
+> {
+  if (!isOpenGame(input.gameId as ChallengeId)) return { error: "unknown-game" };
+
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, input.code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return { error: "not-found" };
+
+  // The player must belong to this event.
+  const playerRows = await db
+    .select({ id: players.id })
+    .from(players)
+    .where(and(eq(players.id, input.playerId), eq(players.eventId, eventRow.id)))
+    .limit(1);
+  if (!playerRows[0]) return { error: "player-not-in-event" };
+
+  const inserted = await db
+    .insert(openScores)
+    .values({
+      eventId: eventRow.id,
+      playerId: input.playerId,
+      gameId: input.gameId,
+      score: String(input.score),
+      meta: input.meta ?? {},
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  if (inserted[0]) return { ok: true, inserted: true, row: inserted[0] };
+
+  // Conflict — a score already existed. Return it so the caller can 409.
+  const existing = await db
+    .select()
+    .from(openScores)
+    .where(
+      and(
+        eq(openScores.eventId, eventRow.id),
+        eq(openScores.playerId, input.playerId),
+        eq(openScores.gameId, input.gameId),
+      ),
+    )
+    .limit(1);
+  return { ok: true, inserted: false, row: existing[0] };
+}
+
+/**
+ * All open-play scores for an event (across every player and game). The
+ * leaderboard route pairs these with the roster (via getEventByCode) to
+ * compute per-game and game-wide standings server-side.
+ */
+export async function getOpenScores(code: string): Promise<Array<{
+  playerId: string;
+  gameId: string;
+  score: number;
+  completedAt: number;
+}> | null> {
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.code, code))
+    .limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) return null;
+
+  const rows = await db
+    .select()
+    .from(openScores)
+    .where(eq(openScores.eventId, eventRow.id));
+
+  return rows.map((r) => ({
+    playerId: r.playerId,
+    gameId: r.gameId,
+    score: Number(r.score),
+    completedAt: r.completedAt.getTime(),
   }));
 }
 

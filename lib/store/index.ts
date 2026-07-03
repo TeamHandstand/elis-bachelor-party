@@ -54,7 +54,7 @@ export interface ToastyStore {
   progress: Record<string /*teamId*/, TeamProgress>;
 
   // ephemeral live levels for scream/shake/selfie-sync (last sample per player)
-  liveLevels: Record<string /*playerId*/, Partial<Record<"scream" | "shake" | "selfie-sync", { level: number; ts: number }>>>;
+  liveLevels: Record<string /*playerId*/, Partial<Record<"scream" | "shake" | "selfie-sync", { level: number; ts: number; faceIndex?: number }>>>;
 
   // ---- actions ----
   bootstrap(args: {
@@ -168,7 +168,11 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
 
       case "live": {
         const playerLevels = { ...(state.liveLevels[msg.playerId] ?? {}) };
-        playerLevels[msg.challenge] = { level: msg.level, ts: msg.ts };
+        playerLevels[msg.challenge] = {
+          level: msg.level,
+          ts: msg.ts,
+          faceIndex: msg.faceIndex,
+        };
         set({
           liveLevels: { ...state.liveLevels, [msg.playerId]: playerLevels },
         });
@@ -436,6 +440,11 @@ export const useToastyStore = create<ToastyStore>((set, get) => ({
         });
         break;
       }
+
+      // Open Play nudge — handled only by the open-play pages (which subscribe
+      // separately). The heptathlon team store has nothing to update.
+      case "open-score":
+        break;
     }
   },
 

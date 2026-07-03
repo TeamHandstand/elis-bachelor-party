@@ -110,6 +110,14 @@ export default function LobbyPage() {
     }
   }, [event?.status, code, router]);
 
+  // Open-play events have no lobby — if one lands here (direct nav / stale
+  // link), bounce to the self-paced games hub.
+  useEffect(() => {
+    if (event?.mode === "open") {
+      router.replace(`/e/${code}/games`);
+    }
+  }, [event?.mode, code, router]);
+
   const allPlayers = useMemo(() => Object.values(players), [players]);
   const teamsList = useMemo(() => Object.values(teams), [teams]);
   const pool = allPlayers.filter((p) => !p.teamId);

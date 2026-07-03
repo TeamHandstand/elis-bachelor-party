@@ -148,6 +148,11 @@ export default function HostEventList({ initial }: Props) {
                     <span className="font-display text-lg font-bold truncate">
                       {ev.title || "Untitled event"}
                     </span>
+                    {ev.mode === "open" ? (
+                      <span className="px-2 py-0.5 rounded-full bg-accent-purple/80 text-white text-[10px] uppercase tracking-widest font-extrabold">
+                        🎮 open play
+                      </span>
+                    ) : null}
                     {inCountdown ? (
                       <span className="px-2 py-0.5 rounded-full bg-accent-orange text-bg text-[10px] uppercase tracking-widest font-extrabold animate-pulse">
                         ⏱ COUNTDOWN

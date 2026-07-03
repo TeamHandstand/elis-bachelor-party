@@ -17,6 +17,10 @@ export const events = pgTable("events", {
   title: text("title").notNull().default("Bachelor Party"),
   groomName: text("groom_name").notNull().default(""),
   status: text("status").notNull().default("lobby"), // 'lobby' | 'active' | 'finished'
+  // Game mode. 'heptathlon' = the original host-driven, team-based sequential
+  // flow. 'open' = self-paced solo open play (own leaderboards, play-each-once).
+  // Defaulted so every existing event keeps the heptathlon behavior untouched.
+  mode: text("mode").notNull().default("heptathlon"), // 'heptathlon' | 'open'
   challenges: jsonb("challenges").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   startedAt: timestamp("started_at", { withTimezone: true }),
@@ -75,6 +79,34 @@ export const finalProgress = pgTable(
   }),
 );
 
+// Open Play scores — one row per (player, game). Keyed by PLAYER (not team)
+// and by game_id (a ChallengeId), so a player can play each game exactly once
+// (the primary key enforces play-once). Entirely separate from final_progress;
+// heptathlon never reads this table and open play never writes final_progress.
+export const openScores = pgTable(
+  "open_scores",
+  {
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    gameId: text("game_id").notNull(),
+    // The player's single-attempt score. Ranking direction (higher/lower is
+    // better) is a per-game property held in OPEN_GAMES, not here.
+    score: numeric("score").notNull(),
+    // Optional per-game extras (e.g. raw units) for display/debugging.
+    meta: jsonb("meta").notNull().default({}),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.eventId, table.playerId, table.gameId] }),
+  }),
+);
+
 // Reusable trivia question bundles. Global (not scoped to an event) — the
 // host can apply any preset to any trivia round in any event. Stored as
 // jsonb so the question shape can evolve without a migration.
@@ -90,4 +122,5 @@ export type EventRow = typeof events.$inferSelect;
 export type TeamRow = typeof teams.$inferSelect;
 export type PlayerRow = typeof players.$inferSelect;
 export type FinalProgressRow = typeof finalProgress.$inferSelect;
+export type OpenScoreRow = typeof openScores.$inferSelect;
 export type TriviaPresetRow = typeof triviaPresets.$inferSelect;

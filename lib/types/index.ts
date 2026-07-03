@@ -36,6 +36,11 @@ export type ChallengeId =
 
 export type EventStatus = "lobby" | "active" | "finished";
 
+// Game mode for an event. 'heptathlon' is the original host-driven, team-based
+// sequential flow; 'open' is self-paced solo open play with per-game and
+// game-wide leaderboards. Defaulted to 'heptathlon' on read for old rows.
+export type EventMode = "heptathlon" | "open";
+
 export type AggregationMode =
   | "team-total" // sum across teammates (distance, steps, taps)
   | "all-simultaneous" // all 3 mics/phones must satisfy the condition concurrently (scream, shake)
@@ -218,6 +223,17 @@ export interface TeamRenamedMsg {
   ts: number;
 }
 
+// Open Play nudge: a player just submitted a single-attempt score for a game.
+// Carries no leaderboard data — clients refetch GET /open/leaderboard on receipt
+// (scoring is computed server-side over the whole roster). The heptathlon store
+// ignores this kind; only the open-play pages act on it.
+export interface OpenScoreMsg {
+  kind: "open-score";
+  playerId: string;
+  gameId: string;
+  ts: number;
+}
+
 export type ProgressMsg =
   | ProgressDeltaMsg
   | LiveLevelMsg
@@ -235,7 +251,8 @@ export type ProgressMsg =
   | RoundEndMsg
   | HostChangedMsg
   | PlayerRenamedMsg
-  | TeamRenamedMsg;
+  | TeamRenamedMsg
+  | OpenScoreMsg;
 
 // ----- Domain entities (mirror DB rows; serializable for client use) -----
 
@@ -298,8 +315,11 @@ export interface EventConfig {
   title: string;
   groomName: string;
   status: EventStatus;
+  // Which game mode this event runs. Defaults to 'heptathlon' for old rows.
+  mode: EventMode;
   // Ordered list of rounds. Index in this array IS the round index used
-  // throughout PubNub messages, progress storage, and host UI.
+  // throughout PubNub messages, progress storage, and host UI. In open mode
+  // this is the list of games available to play (each played once).
   rounds: RoundConfig[];
   createdAt: string;
   startedAt: string | null;
