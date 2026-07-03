@@ -6,10 +6,11 @@
 // in the event config).
 
 import { useMemo, useState } from "react";
-import { scoreTriviaAnswers } from "@/lib/challenges";
+import { OPEN_GAMES, scoreTriviaAnswers } from "@/lib/challenges";
 import type { TriviaQuestion } from "@/lib/types";
+import GameIntro from "@/components/challenge/open/GameIntro";
 
-type Phase = "answering" | "done";
+type Phase = "intro" | "answering" | "done";
 
 export default function TriviaAttempt({
   questions,
@@ -19,7 +20,7 @@ export default function TriviaAttempt({
   onSubmit: (score: number, meta?: Record<string, unknown>) => Promise<void> | void;
 }) {
   const [answers, setAnswers] = useState<Record<string, number>>({});
-  const [phase, setPhase] = useState<Phase>("answering");
+  const [phase, setPhase] = useState<Phase>("intro");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,6 +63,19 @@ export default function TriviaAttempt({
       setError(e instanceof Error ? e.message : "Couldn’t submit.");
       setSubmitting(false);
     }
+  }
+
+  if (phase === "intro") {
+    return (
+      <GameIntro
+        emoji="❓"
+        title="Trivia"
+        blurb={`${questions.length} question${questions.length === 1 ? "" : "s"} — how many can you get right?`}
+        steps={OPEN_GAMES.trivia!.howTo}
+        onStart={() => setPhase("answering")}
+        startLabel="LET'S GO"
+      />
+    );
   }
 
   return (

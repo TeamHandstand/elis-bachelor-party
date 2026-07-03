@@ -1,16 +1,19 @@
 "use client";
 
-// Open Play "Scream Bird": one life. Yell to flap, dodge pipes; the run ends on
-// the first crash and the score is the meters travelled. Reuses FLAPPY_CONFIG
-// and the DbMeter mic sensor, but is standalone (no team store / PubNub, and no
-// respawn — unlike the heptathlon FlappyView which accumulates toward a team
-// total).
+// Open Play "Scream Bird": 3 lives. Yell to flap, dodge pipes; each life ends on
+// a crash, and the meters from all 3 lives are summed into the final score.
+// Reuses FLAPPY_CONFIG + the DbMeter mic sensor (kept alive across lives so it
+// doesn't re-prompt), but standalone — no team store / PubNub.
 
 import { useEffect, useRef, useState } from "react";
 import { DbMeter } from "@/lib/sensors/db-meter";
 import { FLAPPY_CONFIG } from "@/components/challenge/flappy-config";
+import GameIntro from "@/components/challenge/open/GameIntro";
+import { OPEN_GAMES } from "@/lib/challenges";
 
-type Phase = "idle" | "playing" | "done";
+type Phase = "idle" | "playing" | "between" | "done";
+
+const LIVES = 3;
 
 function flapVelocityForDb(db: number): number {
   const { flapThresholdDb, flapSaturationDb, flapVelocityMin, flapVelocityMax } =
@@ -32,21 +35,34 @@ export default function FlappyAttempt({
   onSubmit: (score: number, meta?: Record<string, unknown>) => Promise<void> | void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
-  const [meters, setMeters] = useState(0);
+  const [meters, setMeters] = useState(0); // current life
   const [db, setDb] = useState(0);
-  const [finalMeters, setFinalMeters] = useState(0);
+  const [livesUsed, setLivesUsed] = useState(0);
+  const [lifeMeters, setLifeMeters] = useState(0); // just-finished life
+  const [total, setTotal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const sensorRef = useRef<DbMeter | null>(null);
+  const micUnsubRef = useRef<(() => void) | null>(null);
   const dbRef = useRef(0);
+  const totalRef = useRef(0);
+  const livesUsedRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
   if (!sensorRef.current) sensorRef.current = new DbMeter();
 
-  // Measure the play area.
+  // Tear down the mic on unmount.
+  useEffect(() => {
+    return () => {
+      micUnsubRef.current?.();
+      micUnsubRef.current = null;
+    };
+  }, []);
+
+  // Measure play area while playing.
   useEffect(() => {
     if (phase !== "playing" || !wrapRef.current) return;
     const el = wrapRef.current;
@@ -60,24 +76,7 @@ export default function FlappyAttempt({
     return () => ro.disconnect();
   }, [phase]);
 
-  // Mic sampling while playing.
-  useEffect(() => {
-    if (phase !== "playing") return;
-    let unsub: (() => void) | null = null;
-    let cancelled = false;
-    (async () => {
-      unsub = await sensorRef.current!.start((level) => {
-        dbRef.current = level;
-      });
-      if (cancelled) unsub?.();
-    })();
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
-  }, [phase]);
-
-  // Game loop.
+  // One life of the game loop.
   useEffect(() => {
     if (phase !== "playing") return;
     const canvas = canvasRef.current;
@@ -98,6 +97,7 @@ export default function FlappyAttempt({
     let pipes: Pipe[] = [];
     let scrollPx = 0;
     let metersRun = 0;
+    let ended = false;
     let lastTs = performance.now();
     let raf = 0;
     let lastHud = 0;
@@ -113,10 +113,17 @@ export default function FlappyAttempt({
     spawnPipe(W + 80 + cfg.pipeSpacingPx * 2);
 
     function finish() {
+      if (ended) return;
+      ended = true;
       cancelAnimationFrame(raf);
-      setFinalMeters(Math.floor(metersRun));
-      setMeters(Math.floor(metersRun));
-      setPhase("done");
+      const life = Math.floor(metersRun);
+      totalRef.current += life;
+      livesUsedRef.current += 1;
+      setLifeMeters(life);
+      setTotal(totalRef.current);
+      setLivesUsed(livesUsedRef.current);
+      if (livesUsedRef.current >= LIVES) setPhase("done");
+      else setPhase("between");
     }
 
     function step(now: number) {
@@ -141,7 +148,6 @@ export default function FlappyAttempt({
       }
       pipes = pipes.filter((p) => p.x + cfg.pipeWidth > -10);
 
-      // Collisions → end the run.
       if (birdY < cfg.birdRadius || birdY > H - cfg.birdRadius) {
         draw();
         finish();
@@ -208,19 +214,33 @@ export default function FlappyAttempt({
       ctx.restore();
     }
 
+    setMeters(0);
     raf = requestAnimationFrame(step);
     return () => {
       cancelAnimationFrame(raf);
     };
   }, [phase, size.w, size.h]);
 
-  async function start() {
+  async function begin() {
     setError(null);
     const ok = await sensorRef.current!.requestPermission().catch(() => false);
     if (!ok) {
       setError("Mic access denied — yelling is how the bird flies. Enable it and retry.");
       return;
     }
+    // Keep one mic stream alive for all 3 lives.
+    micUnsubRef.current = await sensorRef.current!.start((level) => {
+      dbRef.current = level;
+    });
+    totalRef.current = 0;
+    livesUsedRef.current = 0;
+    setTotal(0);
+    setLivesUsed(0);
+    setMeters(0);
+    setPhase("playing");
+  }
+
+  function nextLife() {
     setMeters(0);
     setPhase("playing");
   }
@@ -229,78 +249,119 @@ export default function FlappyAttempt({
     if (submitting) return;
     setSubmitting(true);
     setError(null);
+    micUnsubRef.current?.();
+    micUnsubRef.current = null;
     try {
-      await onSubmit(finalMeters);
+      await onSubmit(totalRef.current, { lives: LIVES });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn’t submit.");
       setSubmitting(false);
     }
   }
 
+  const livesLeft = LIVES - livesUsed;
+
+  if (phase === "idle") {
+    return (
+      <div className="flex flex-col gap-4">
+        <GameIntro
+          emoji="🐦"
+          title="Scream Bird"
+          blurb={OPEN_GAMES.flappy!.instruction}
+          steps={OPEN_GAMES.flappy!.howTo}
+          onStart={begin}
+          startLabel="START LIFE 1"
+          footer="3 lives — your meters add up. Find a room where you can be loud."
+        />
+        {error && <div className="text-accent-pink text-sm text-center">{error}</div>}
+      </div>
+    );
+  }
+
+  if (phase === "between") {
+    return (
+      <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-4 text-center">
+        <div className="text-5xl">💀</div>
+        <div className="text-xs uppercase tracking-widest opacity-60">
+          life {livesUsed} down · you flew
+        </div>
+        <div className="font-display text-4xl font-extrabold">{lifeMeters}m</div>
+        <div className="flex items-center justify-center gap-4 text-sm">
+          <span className="opacity-70">
+            total so far: <b className="text-accent-orange">{total}m</b>
+          </span>
+          <span className="opacity-70">
+            lives left: <b>{"🐦".repeat(livesLeft)}</b>
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={nextLife}
+          className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest"
+        >
+          START LIFE {livesUsed + 1} ▶
+        </button>
+      </div>
+    );
+  }
+
+  if (phase === "done") {
+    return (
+      <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center">
+        <div className="text-5xl">🏁</div>
+        <div className="text-xs uppercase tracking-widest opacity-60">
+          all 3 lives done · total distance
+        </div>
+        <div className="font-display text-5xl font-extrabold text-accent-orange">
+          {total}m
+        </div>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting}
+          className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
+        >
+          {submitting ? "SAVING…" : "SUBMIT 🔒"}
+        </button>
+        <div className="text-[11px] opacity-50">This locks in your total.</div>
+        {error && <div className="text-accent-pink text-sm">{error}</div>}
+      </div>
+    );
+  }
+
+  // phase === "playing"
   return (
-    <div className="flex flex-col gap-4">
-      {phase === "idle" && (
-        <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center">
-          <div className="text-4xl">🐦</div>
-          <div className="text-sm opacity-80">
-            Flappy Bird, but yelling makes the bird fly. Louder = bigger flap.
-            You get ONE life — fly as far as you can.
-          </div>
-          <button
-            type="button"
-            onClick={start}
-            className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest"
-          >
-            START ▶
-          </button>
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between px-1 pb-2">
+        <div className="text-sm">
+          life <b>{livesUsed + 1}</b>/{LIVES} · {"🐦".repeat(livesLeft)}
         </div>
-      )}
-
-      {phase === "playing" && (
-        <div className="flex flex-col">
-          <div className="text-center pb-2">
-            <div className="font-display text-5xl font-extrabold tabular-nums text-accent-orange leading-none">
-              {meters}
-              <span className="text-2xl opacity-70">m</span>
-            </div>
-            <div
-              className={`text-[11px] tabular-nums mt-1 ${
-                db >= FLAPPY_CONFIG.flapThresholdDb ? "text-accent-orange font-extrabold" : "opacity-70"
-              }`}
-            >
-              {Math.round(db)} dB · flap @ {FLAPPY_CONFIG.flapThresholdDb}
-            </div>
-          </div>
-          <div
-            ref={wrapRef}
-            className="relative h-[55vh] rounded-2xl overflow-hidden bg-bg-deep border border-white/10"
-          >
-            <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
-            <div className="absolute bottom-2 left-0 right-0 text-center text-[11px] opacity-60 px-3 pointer-events-none">
-              YELL to flap. Louder = bigger jump.
-            </div>
-          </div>
+        <div className="text-sm opacity-70">
+          total: <b className="text-accent-orange">{total + meters}m</b>
         </div>
-      )}
-
-      {phase === "done" && (
-        <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center">
-          <div className="text-5xl">💀</div>
-          <div className="text-xs uppercase tracking-widest opacity-60">splat! you flew</div>
-          <div className="font-display text-4xl font-extrabold">{finalMeters}m</div>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting}
-            className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
-          >
-            {submitting ? "SAVING…" : "SUBMIT 🔒"}
-          </button>
-          <div className="text-[11px] opacity-50">One life each — this locks in your run.</div>
+      </div>
+      <div className="text-center pb-2">
+        <div className="font-display text-5xl font-extrabold tabular-nums text-accent-orange leading-none">
+          {meters}
+          <span className="text-2xl opacity-70">m</span>
         </div>
-      )}
-
-      {error && <div className="text-accent-pink text-sm text-center">{error}</div>}
+        <div
+          className={`text-[11px] tabular-nums mt-1 ${
+            db >= FLAPPY_CONFIG.flapThresholdDb ? "text-accent-orange font-extrabold" : "opacity-70"
+          }`}
+        >
+          {Math.round(db)} dB · flap @ {FLAPPY_CONFIG.flapThresholdDb}
+        </div>
+      </div>
+      <div
+        ref={wrapRef}
+        className="relative h-[52vh] rounded-2xl overflow-hidden bg-bg-deep border border-white/10"
+      >
+        <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
+        <div className="absolute bottom-2 left-0 right-0 text-center text-[11px] opacity-60 px-3 pointer-events-none">
+          YELL to flap. Louder = bigger jump.
+        </div>
+      </div>
     </div>
   );
 }

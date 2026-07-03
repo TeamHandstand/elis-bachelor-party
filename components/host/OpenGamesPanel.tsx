@@ -1,10 +1,9 @@
 "use client";
 
-// Host config for an OPEN event: pick which single-attempt games are included.
-// Reuses the same PATCH /api/events/:code save path (patchEvent) and the
-// event.rounds list — for open events each round is just a game played once.
-// Trivia additionally carries an authored question set (edited via the same
-// TriviaRoundModal the heptathlon config uses).
+// Host config for an OPEN event: pick which single-attempt games are included
+// and tune each game's target/time. Reuses the PATCH /api/events/:code save path
+// (patchEvent) and the event.rounds list — for open events each round is a game
+// played once. Trivia additionally carries an authored question set.
 
 import { useMemo, useState } from "react";
 import { patchEvent } from "./_fetch";
@@ -20,8 +19,7 @@ export default function OpenGamesPanel({
   onSaved: (e: EventConfig) => void;
 }) {
   const allGames = useMemo(() => Object.values(OPEN_GAMES) as OpenGameSpec[], []);
-  // Preserve any host-tuned attempt duration already stored per round.
-  const durationById = useMemo(
+  const thresholdById = useMemo(
     () => new Map(event.rounds.map((r) => [r.challenge, r.threshold] as const)),
     [event.rounds],
   );
@@ -34,6 +32,16 @@ export default function OpenGamesPanel({
           .filter((id) => id in OPEN_GAMES) as ChallengeId[],
       ),
   );
+  // Per-game editable value in DISPLAY units (e.g. seconds), for games with config.
+  const [values, setValues] = useState<Record<string, number>>(() => {
+    const out: Record<string, number> = {};
+    for (const g of allGames) {
+      if (!g.config) continue;
+      const stored = thresholdById.get(g.gameId) ?? g.durationMs;
+      out[g.gameId] = Math.round(stored / g.config.scale);
+    }
+    return out;
+  });
   const [triviaQuestions, setTriviaQuestions] = useState<TriviaQuestion[]>(
     () => event.rounds.find((r) => r.challenge === "trivia")?.questions ?? [],
   );
@@ -55,6 +63,13 @@ export default function OpenGamesPanel({
     });
   }
 
+  function setValue(g: OpenGameSpec, raw: number) {
+    if (!g.config) return;
+    const v = Math.max(g.config.min, Math.min(g.config.max, raw));
+    setSaved(false);
+    setValues((prev) => ({ ...prev, [g.gameId]: v }));
+  }
+
   async function save() {
     if (busy || enabled.size === 0 || triviaEnabledButEmpty) return;
     setBusy(true);
@@ -66,14 +81,14 @@ export default function OpenGamesPanel({
           if (g.gameId === "trivia") {
             return { challenge: "trivia", threshold: 0, questions: triviaQuestions };
           }
-          return {
-            challenge: g.gameId,
-            threshold: durationById.get(g.gameId) ?? g.durationMs,
-          };
+          if (g.config) {
+            const disp = values[g.gameId] ?? Math.round(g.durationMs / g.config.scale);
+            return { challenge: g.gameId, threshold: Math.round(disp * g.config.scale) };
+          }
+          return { challenge: g.gameId, threshold: thresholdById.get(g.gameId) ?? g.durationMs };
         });
       const { event: updated } = await patchEvent(event.code, { rounds });
       onSaved(updated);
-      // Re-sync questions from the sanitized server response.
       setTriviaQuestions(
         updated.rounds.find((r) => r.challenge === "trivia")?.questions ?? [],
       );
@@ -89,9 +104,9 @@ export default function OpenGamesPanel({
     <div className="bg-bg-card rounded-xl2 p-4">
       <div className="font-display text-lg font-extrabold mb-1">Games</div>
       <p className="text-xs opacity-60 mb-4">
-        Choose which games are in this open-play event. Everyone plays each one
-        once; each has its own leaderboard, and placements add up to the overall
-        board.
+        Choose which games are in this open-play event and tune each one.
+        Everyone plays each game once; each has its own leaderboard, and
+        placements add up to the overall board.
       </p>
 
       <div className="space-y-2">
@@ -101,37 +116,63 @@ export default function OpenGamesPanel({
           const isTrivia = g.gameId === "trivia";
           const subtitle = isTrivia
             ? `${triviaQuestions.length} question${triviaQuestions.length === 1 ? "" : "s"}`
-            : `${g.instruction}`;
+            : g.instruction;
           return (
             <div
               key={g.gameId}
-              onClick={() => toggle(g.gameId)}
-              className={`w-full flex items-center gap-3 rounded-xl p-3 border transition-colors text-left cursor-pointer ${
+              className={`w-full rounded-xl p-3 border transition-colors ${
                 on
                   ? "bg-gradient-party border-transparent"
                   : "bg-bg-deep/40 border-white/10 hover:border-accent-orange/50"
               }`}
             >
-              <div className="text-2xl">{meta.emoji}</div>
-              <div className="flex-1 min-w-0">
-                <div className="font-bold">{meta.label}</div>
-                <div className="text-xs opacity-70 truncate">{subtitle}</div>
+              <div
+                onClick={() => toggle(g.gameId)}
+                className="flex items-center gap-3 cursor-pointer"
+              >
+                <div className="text-2xl">{meta.emoji}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold">{meta.label}</div>
+                  <div className="text-xs opacity-70 truncate">{subtitle}</div>
+                </div>
+                {isTrivia && on ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingTrivia(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-bg-deep/70 border border-white/20 text-xs font-bold"
+                  >
+                    ✏️ questions
+                  </button>
+                ) : null}
+                <div className="font-display font-extrabold text-lg">
+                  {on ? "✓" : "+"}
+                </div>
               </div>
-              {isTrivia && on ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingTrivia(true);
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-bg-deep/70 border border-white/20 text-xs font-bold"
+
+              {on && g.config ? (
+                <div
+                  className="mt-3 flex items-center gap-2 pl-11"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  ✏️ questions
-                </button>
+                  <label className="text-xs font-bold opacity-90">{g.config.label}</label>
+                  <input
+                    type="number"
+                    min={g.config.min}
+                    max={g.config.max}
+                    step={g.config.step}
+                    value={values[g.gameId] ?? Math.round(g.durationMs / g.config.scale)}
+                    onChange={(e) => setValue(g, Number(e.target.value))}
+                    className="w-20 rounded-lg bg-bg-deep border border-white/20 px-2 py-1.5 text-sm font-bold outline-none focus:border-white/50"
+                  />
+                  <span className="text-xs opacity-70">{g.config.unit}</span>
+                  <span className="text-[10px] opacity-50">
+                    ({g.config.min}–{g.config.max})
+                  </span>
+                </div>
               ) : null}
-              <div className="font-display font-extrabold text-lg">
-                {on ? "✓" : "+"}
-              </div>
             </div>
           );
         })}

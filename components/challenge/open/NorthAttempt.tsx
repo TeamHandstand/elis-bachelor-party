@@ -5,6 +5,8 @@
 // reuses the compass math from NorthView but no team store / PubNub.
 
 import { useEffect, useRef, useState } from "react";
+import GameIntro from "@/components/challenge/open/GameIntro";
+import { OPEN_GAMES } from "@/lib/challenges";
 
 type Phase = "idle" | "aiming" | "done";
 
@@ -97,19 +99,15 @@ export default function NorthAttempt({
   return (
     <div className="flex flex-col items-center gap-4">
       {phase === "idle" && (
-        <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center w-full">
-          <div className="text-4xl">🧭</div>
-          <div className="text-sm opacity-80">
-            Aim the top of your phone where you think TRUE NORTH is. No cheats,
-            no map apps — just vibes. Closest guess wins.
-          </div>
-          <button
-            type="button"
-            onClick={start}
-            className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest"
-          >
-            START ▶
-          </button>
+        <div className="w-full">
+          <GameIntro
+            emoji="🧭"
+            title="Due North"
+            blurb={OPEN_GAMES.north!.instruction}
+            steps={OPEN_GAMES.north!.howTo}
+            onStart={start}
+            footer="Uses your phone's compass — you'll get a permission popup."
+          />
         </div>
       )}
 

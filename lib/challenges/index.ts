@@ -289,6 +289,17 @@ export function defaultChallengeConfig(): RoundConfig[] {
 // The RoundConfig.threshold of an open game is reinterpreted as the attempt
 // duration in ms (so the host can tune it via the same config path).
 
+// Editable numeric config for an open game (maps to RoundConfig.threshold).
+// The host edits in display units (`unit`); the stored value is display*scale.
+export interface OpenGameConfig {
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+  scale: number; // stored threshold = displayed value * scale
+}
+
 export interface OpenGameSpec {
   gameId: ChallengeId;
   // Ranking direction on the per-game leaderboard.
@@ -297,7 +308,7 @@ export interface OpenGameSpec {
   //  - "counting": a CountingSensor accumulated over a fixed window.
   //  - "north": one compass "lock in" → angular error.
   //  - "time-guess": GO/STOP timing → deviation from a target.
-  //  - "flappy": one Scream Bird life → meters travelled.
+  //  - "flappy": Scream Bird — 3 lives, meters summed.
   //  - "trivia": answer the round's question set → correct count.
   kind: "counting" | "north" | "time-guess" | "flappy" | "trivia";
   // For "counting": the attempt window (ms). For "time-guess": the target
@@ -309,9 +320,22 @@ export interface OpenGameSpec {
   sensor?: "taps" | "steps" | "spin" | "air-time";
   // Short imperative shown on the attempt screen.
   instruction: string;
+  // Step-by-step tutorial shown before the player starts.
+  howTo: string[];
+  // Host-editable numeric config (target/time). Omitted → nothing to tune.
+  config?: OpenGameConfig;
   // Format the raw score for display.
   formatScore: (score: number) => string;
 }
+
+const TIME_LIMIT_CONFIG = (label: string): OpenGameConfig => ({
+  label,
+  unit: "s",
+  min: 5,
+  max: 60,
+  step: 5,
+  scale: 1000,
+});
 
 export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
   taps: {
@@ -322,6 +346,12 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
     input: "tap-surface",
     sensor: "taps",
     instruction: "Tap the screen as fast as you can!",
+    howTo: [
+      "When the timer starts, hammer the big pad as fast as you can.",
+      "Use both thumbs — every tap counts.",
+      "Most taps before the clock hits zero wins.",
+    ],
+    config: TIME_LIMIT_CONFIG("Time limit"),
     formatScore: (s) => `${Math.floor(s).toLocaleString()} taps`,
   },
   steps: {
@@ -332,6 +362,12 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
     input: "motion",
     sensor: "steps",
     instruction: "Run in place / walk — rack up as many steps as you can!",
+    howTo: [
+      "Hold your phone or pocket it, then hit START.",
+      "Run in place or march hard until the timer ends.",
+      "The most steps counted wins.",
+    ],
+    config: TIME_LIMIT_CONFIG("Time limit"),
     formatScore: (s) => `${Math.floor(s).toLocaleString()} steps`,
   },
   spin: {
@@ -341,7 +377,13 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
     durationMs: 20000,
     input: "motion",
     sensor: "spin",
-    instruction: "Spin in place — the more rotations the better!",
+    instruction: "Hold both buttons and spin — the more rotations the better!",
+    howTo: [
+      "Hold BOTH on-screen buttons down — spins only count while both are held.",
+      "Spin your whole body in circles (don't just wave the phone).",
+      "The most rotations before time runs out wins.",
+    ],
+    config: TIME_LIMIT_CONFIG("Spin time"),
     formatScore: (s) => `${(s / 360).toFixed(1)} spins`,
   },
   "air-time": {
@@ -352,6 +394,13 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
     input: "motion",
     sensor: "air-time",
     instruction: "Toss the phone (carefully!) — total seconds airborne wins.",
+    howTo: [
+      "Gently toss your phone straight up and catch it.",
+      "Higher tosses = more airborne seconds, and they all add up.",
+      "Most total air time before the clock ends wins.",
+      "Do this over a bed or couch. Seriously.",
+    ],
+    config: TIME_LIMIT_CONFIG("Time limit"),
     formatScore: (s) => `${s.toFixed(1)}s airborne`,
   },
   north: {
@@ -360,6 +409,11 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
     kind: "north",
     durationMs: 0,
     instruction: "Aim the top of your phone at TRUE NORTH, then lock in.",
+    howTo: [
+      "Point the TOP of your phone where you think TRUE north is.",
+      "No compass apps, no cheating — go with your gut.",
+      "Tap LOCK IN. Closest to actual north wins.",
+    ],
     formatScore: (s) => `${s.toFixed(0)}° off`,
   },
   "time-guess": {
@@ -368,6 +422,19 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
     kind: "time-guess",
     durationMs: 30000, // target elapsed time
     instruction: "Tap GO, wait what feels right, tap STOP at the target time.",
+    howTo: [
+      "Tap GO to start a HIDDEN timer — you won't see it counting.",
+      "Count the target time in your head. No clocks, no phones, no help.",
+      "Tap STOP the instant you think you've hit it. Closest guess wins.",
+    ],
+    config: {
+      label: "Target time",
+      unit: "s",
+      min: 5,
+      max: 120,
+      step: 5,
+      scale: 1000,
+    },
     formatScore: (s) => `${(s / 1000).toFixed(2)}s off`,
   },
   flappy: {
@@ -375,7 +442,13 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
     direction: "higher",
     kind: "flappy",
     durationMs: 0,
-    instruction: "Yell to fly, dodge the pipes. One life — how far can you get?",
+    instruction: "Yell to fly, dodge the pipes. 3 lives — distances add up.",
+    howTo: [
+      "YELL to make the bird flap upward — the louder you are, the bigger the flap.",
+      "Dodge the green pipes and don't smack the ceiling or floor.",
+      "You get 3 lives. Each life ends when you crash.",
+      "Your meters from all 3 lives are added together — go for the biggest total.",
+    ],
     formatScore: (s) => `${Math.floor(s)}m`,
   },
   trivia: {
@@ -384,6 +457,11 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
     kind: "trivia",
     durationMs: 0,
     instruction: "Answer every question. Most correct wins.",
+    howTo: [
+      "Read each question and tap your answer.",
+      "You can change picks until you submit.",
+      "Most correct wins — you only get ONE submission.",
+    ],
     formatScore: (s) => `${Math.floor(s)} correct`,
   },
 };
