@@ -65,23 +65,34 @@ export default function JoinPage() {
     return pool.length > 0 ? [...teamGroups, { team: null, roster: pool }] : teamGroups;
   }, [eventData]);
 
-  // Open-play events skip the lobby and go straight to the self-paced games hub.
-  function landingRoute() {
-    return eventData?.event.mode === "open"
-      ? `/e/${code}/games`
-      : `/e/${code}/lobby`;
+  // Where a player lands after identifying themselves. Open-play events skip
+  // the lobby entirely and go to the self-paced games hub. For heptathlon,
+  // once the event has left the lobby send returning players (and people
+  // logging in as someone already on the roster) straight to the journey —
+  // /lobby has no useful UI for active or finished events and would just
+  // bounce again, sometimes getting stuck on finished events the user wants
+  // to review.
+  function destinationForStatus(): string {
+    if (eventData?.event.mode === "open") {
+      return `/e/${code}/games`;
+    }
+    const status = eventData?.event.status;
+    if (status === "active" || status === "finished") {
+      return `/e/${code}/play`;
+    }
+    return `/e/${code}/lobby`;
   }
 
-  function continueToLobby() {
+  function handleContinue() {
     if (!savedPlayer) return;
-    router.replace(landingRoute());
+    router.replace(destinationForStatus());
   }
 
   function pickExisting(player: Player) {
     if (typeof window === "undefined") return;
     localStorage.setItem(`toasty-player-id-${code}`, player.id);
     setSavedPlayerId(player.id);
-    router.replace(landingRoute());
+    router.replace(destinationForStatus());
   }
 
   async function submit(e: React.FormEvent) {
@@ -108,7 +119,7 @@ export default function JoinPage() {
       }
       const data = (await res.json()) as JoinEventResponse;
       localStorage.setItem(`toasty-player-id-${code}`, data.player.id);
-      router.replace(landingRoute());
+      router.replace(destinationForStatus());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t join");
       setBusy(false);
@@ -143,7 +154,7 @@ export default function JoinPage() {
             </div>
             <button
               type="button"
-              onClick={continueToLobby}
+              onClick={handleContinue}
               className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest"
             >
               CONTINUE 🔥

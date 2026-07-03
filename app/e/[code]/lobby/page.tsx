@@ -91,22 +91,26 @@ export default function LobbyPage() {
     return () => clearInterval(interval);
   }, [hydrated, code, myPlayerId]);
 
-  // Auto-redirect ONLY on the lobby→active or lobby→finished transition,
-  // i.e., the user was watching the lobby and the host kicked things off.
-  // If a returning player navigates back here while the event is already
-  // active, leave them on the lobby with a "rejoin" button so they aren't
-  // trapped in an infinite back-button loop.
+  // Redirect when the event has moved past lobby. Finished events ALWAYS
+  // bounce to the journey (which renders the champion banner + per-round
+  // expandable breakdowns) so a host opening a completed event from the
+  // events list can actually see the results — there's nothing to "be in
+  // the middle of" once the event is over. Active events keep the rejoin
+  // gate (sawLobbyRef) so a back-button bounce doesn't trap the user in a
+  // redirect loop with /play.
   const sawLobbyRef = useRef(false);
   useEffect(() => {
     if (event?.status === "lobby") {
       sawLobbyRef.current = true;
       return;
     }
+    if (event?.status === "finished") {
+      router.replace(`/e/${code}/play`);
+      return;
+    }
     if (!sawLobbyRef.current) return;
     if (event?.status === "active") {
       router.replace(`/e/${code}/play`);
-    } else if (event?.status === "finished") {
-      router.replace(`/e/${code}/done`);
     }
   }, [event?.status, code, router]);
 
@@ -129,9 +133,11 @@ export default function LobbyPage() {
         <div className="font-display text-2xl font-extrabold tracking-wider">
           {event?.status === "active"
             ? "EVENT IS LIVE"
-            : isHost
-              ? "READY WHEN YOU ARE"
-              : "WAITING FOR THE HOST"}
+            : event?.status === "finished"
+              ? "GAME OVER"
+              : isHost
+                ? "READY WHEN YOU ARE"
+                : "WAITING FOR THE HOST"}
         </div>
         <div className="text-xs uppercase tracking-widest opacity-70 mt-1">
           event · {code}

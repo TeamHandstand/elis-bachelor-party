@@ -56,9 +56,20 @@ export const EXPRESSIONS: Expression[] = [
     id: "frown",
     label: "BIG FROWN",
     emoji: "🙁",
-    hint: "Pout. The saddest pout you've got.",
-    score: (b) =>
-      Math.max(b.mouthFrownLeft ?? 0, b.mouthFrownRight ?? 0),
+    hint: "Pout. Drop the corners, push the lower lip out.",
+    // MediaPipe's mouthFrown blendshapes are conservative — even an
+    // exaggerated drunk-pouty face usually peaks around ~0.4-0.5, well
+    // under the 0.5 match threshold the other expressions clear easily.
+    // Scale up the corners signal and let a real pout (mouthLowerDown)
+    // contribute so a committed frown actually registers.
+    score: (b) => {
+      const corners = Math.max(b.mouthFrownLeft ?? 0, b.mouthFrownRight ?? 0);
+      const lowerLip = Math.max(
+        b.mouthLowerDownLeft ?? 0,
+        b.mouthLowerDownRight ?? 0,
+      );
+      return clamp01(corners * 1.6 + lowerLip * 0.4);
+    },
   },
   {
     id: "wink",

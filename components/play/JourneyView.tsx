@@ -564,6 +564,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                     value: tp?.value ?? 0,
                     completedAt: tp?.completedAt ?? null,
                     guesses: tp?.guesses,
+                    perPlayer: tp?.perPlayer,
                   };
                 },
               );
@@ -581,6 +582,7 @@ export function JourneyView({ code, myPlayerId }: Props) {
                   myTeamId={myTeamId}
                   winnerTeamId={winnerForRound}
                   entries={breakdownEntries}
+                  players={playersMap}
                 />
               );
             }

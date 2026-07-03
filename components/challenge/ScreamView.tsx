@@ -53,6 +53,7 @@ function ScreamChallenge({
 
   const [myLevel, setMyLevel] = useState(0);
   const [completeSent, setCompleteSent] = useState(false);
+  const [sustainedSecsState, setSustainedSecsState] = useState(0);
 
   const lastPublishRef = useRef(0);
   const sustainedStartRef = useRef<number | null>(null);
@@ -63,6 +64,18 @@ function ScreamChallenge({
     event?.rounds[roundIndex]?.threshold ?? def.defaultThreshold; // seconds
   const teamCompleted = !!myProgress?.[roundIndex]?.completed;
 
+  // Pull-via-ref so the detector loop below doesn't depend on ever-changing
+  // store values. Subscribing via useToastyStore re-renders the component,
+  // and that's fine; we just want the interval itself to stay mounted.
+  const myTeamIdRef = useRef(myTeamId);
+  myTeamIdRef.current = myTeamId;
+  const teamCompletedRef = useRef(teamCompleted);
+  teamCompletedRef.current = teamCompleted;
+  const completeSentRef = useRef(completeSent);
+  completeSentRef.current = completeSent;
+  const thresholdRef = useRef(threshold);
+  thresholdRef.current = threshold;
+
   useEffect(() => {
     if (!myTeamId) return;
     let unsub: Unsubscribe | null = null;
@@ -72,65 +85,119 @@ function ScreamChallenge({
       // PermissionGate already opened the mic + AudioContext on this instance.
       if (cancelled) return;
       unsub = await sensor.start((level) => {
+        if (cancelled) return;
         lastLevelRef.current = level;
         setMyLevel(level);
         const now = Date.now();
         if (now - lastPublishRef.current >= PUBLISH_INTERVAL_MS) {
           lastPublishRef.current = now;
-          publisher({
-            kind: "live",
-            playerId: myPlayerId,
-            teamId: myTeamId,
-            roundIndex,
-            challenge: "scream",
-            level,
-            ts: now,
-          }).catch(() => {});
+          const tid = myTeamIdRef.current;
+          if (tid) {
+            publisher({
+              kind: "live",
+              playerId: myPlayerId,
+              teamId: tid,
+              roundIndex,
+              challenge: "scream",
+              level,
+              ts: now,
+            }).catch(() => {});
+          }
         }
       });
+      // If the effect was already torn down before sensor.start resolved, run
+      // the cleanup now.
+      if (cancelled && unsub) {
+        try {
+          unsub();
+        } catch {
+          /* ignore */
+        }
+        unsub = null;
+      }
     })();
 
     return () => {
       cancelled = true;
-      unsub?.();
+      const u = unsub;
+      unsub = null;
+      try {
+        u?.();
+      } catch {
+        /* ignore */
+      }
     };
-  }, [myPlayerId, myTeamId, publisher, roundIndex, sensor]);
+    // Intentionally minimal deps: we want this audio pipeline to start once
+    // and stay alive for the whole challenge. The cleanup closes the
+    // AudioContext, and re-opening on iOS Safari requires a user gesture —
+    // so we DON'T want stable values that change once (e.g., myTeamId
+    // hydrating from null) to retrigger this effect after start.
+  }, [myPlayerId, roundIndex, sensor, myTeamId]);
 
-  // Detect "all teammates above 80dB sustained for `threshold` seconds" and publish complete.
+  // Detect "all teammates above 80dB sustained for `threshold` seconds" and
+  // publish complete. Reads teammates / liveLevels from the store inside the
+  // interval so this effect stays mounted across the full round — otherwise
+  // the dep array would re-run it every ~250ms (each live publish), and at
+  // 3+ teammates publishing concurrently the 200ms interval can be cleared
+  // before it ever fires, leaving the timer permanently stuck at 0.
   useEffect(() => {
-    if (!myTeamId || teamCompleted || completeSent) return;
+    if (!myTeamId) return;
     const interval = setInterval(() => {
+      if (teamCompletedRef.current || completeSentRef.current) {
+        sustainedStartRef.current = null;
+        setSustainedSecsState(0);
+        return;
+      }
+
       const now = Date.now();
       const recent = (lvl?: { level: number; ts: number }) =>
         !!lvl && now - lvl.ts < 1500 && lvl.level >= SCREAM_DB;
 
+      const state = useToastyStore.getState();
+      const liveLevelsNow = state.liveLevels;
+      const teammatesNow = Object.values(state.players).filter(
+        (p) => p.teamId === myTeamIdRef.current,
+      );
+
       const me = lastLevelRef.current >= SCREAM_DB;
-      const others = teammates.filter((p) => p.id !== myPlayerId);
-      const allOthers = others.every((p) => recent(liveLevels[p.id]?.scream));
+      const others = teammatesNow.filter((p) => p.id !== myPlayerId);
+      const allOthers = others.every((p) =>
+        recent(liveLevelsNow[p.id]?.scream),
+      );
 
       const allLoud = me && allOthers;
 
       if (allLoud) {
         if (sustainedStartRef.current === null) {
           sustainedStartRef.current = now;
-        } else if (now - sustainedStartRef.current >= threshold * 1000) {
-          if (!completeSent) {
+        }
+        const elapsedMs = now - sustainedStartRef.current;
+        setSustainedSecsState(elapsedMs / 1000);
+        if (elapsedMs >= thresholdRef.current * 1000) {
+          if (!completeSentRef.current) {
+            completeSentRef.current = true;
             setCompleteSent(true);
-            publisher({
-              kind: "complete",
-              teamId: myTeamId,
-              roundIndex,
-              challenge: "scream",
-              ts: now,
-            }).catch(() => {});
+            const tid = myTeamIdRef.current;
+            if (tid) {
+              publisher({
+                kind: "complete",
+                teamId: tid,
+                roundIndex,
+                challenge: "scream",
+                ts: now,
+              }).catch(() => {});
+            }
           }
         }
       } else {
-        sustainedStartRef.current = null;
+        if (sustainedStartRef.current !== null) {
+          sustainedStartRef.current = null;
+          setSustainedSecsState(0);
+        }
       }
     }, 200);
     return () => clearInterval(interval);
-  }, [myTeamId, teammates, liveLevels, myPlayerId, threshold, teamCompleted, completeSent, publisher, roundIndex]);
+  }, [myTeamId, myPlayerId, publisher, roundIndex]);
 
   const others = teammates.filter((p) => p.id !== myPlayerId);
   const meAbove = myLevel >= SCREAM_DB;
@@ -141,9 +208,13 @@ function ScreamChallenge({
   });
   const allLoud = meAbove && othersAbove.every((o) => o.ok);
 
-  const sustainedSecs = sustainedStartRef.current
-    ? (Date.now() - sustainedStartRef.current) / 1000
-    : 0;
+  // Pull from state (set by the detector interval) so the visible timer
+  // stays in sync with the same source of truth that decides completion.
+  const sustainedSecs = sustainedSecsState;
+  const sustainedPct = Math.min(
+    100,
+    threshold > 0 ? (sustainedSecs / threshold) * 100 : 0,
+  );
 
   return (
     <div
@@ -164,6 +235,14 @@ function ScreamChallenge({
               ? `HOLD IT! ${sustainedSecs.toFixed(1)}s / ${threshold}s`
               : "GET LOUD"}
         </div>
+        {!teamCompleted && (
+          <div className="mt-2 mx-auto w-56 h-2 bg-bg-card rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-done transition-all"
+              style={{ width: `${sustainedPct}%` }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex justify-around items-end flex-1 gap-3">

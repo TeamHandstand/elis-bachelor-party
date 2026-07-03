@@ -189,6 +189,16 @@ function InterleaveChallenge({ code, myPlayerId, roundIndex }: Props) {
     else s.pause();
   }, [armed, segmentKind]);
 
+  // Hard reset the spin gate whenever the active segment changes — otherwise
+  // a player who finished a spin segment with both buttons held would re-enter
+  // the next spin segment "armed" without actually pressing anything (the
+  // touch capture from the prior segment never fired pointerUp because the
+  // buttons unmounted underneath the pointer). Same hazard going steps→spin.
+  useEffect(() => {
+    setLeftDown(false);
+    setRightDown(false);
+  }, [segmentKind, located?.index]);
+
   if (!located) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 p-6 text-center">
