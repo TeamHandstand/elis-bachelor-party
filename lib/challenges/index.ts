@@ -293,17 +293,23 @@ export interface OpenGameSpec {
   gameId: ChallengeId;
   // Ranking direction on the per-game leaderboard.
   direction: "higher" | "lower";
-  // Default single-attempt duration in ms (stored per-round in threshold).
+  // Which attempt UI the play screen renders:
+  //  - "counting": a CountingSensor accumulated over a fixed window.
+  //  - "north": one compass "lock in" → angular error.
+  //  - "time-guess": GO/STOP timing → deviation from a target.
+  //  - "flappy": one Scream Bird life → meters travelled.
+  //  - "trivia": answer the round's question set → correct count.
+  kind: "counting" | "north" | "time-guess" | "flappy" | "trivia";
+  // For "counting": the attempt window (ms). For "time-guess": the target
+  // elapsed time (ms). Unused for north/flappy/trivia. Stored per-round in the
+  // round's `threshold` so the host can tune it.
   durationMs: number;
-  // How the attempt screen collects input.
-  //  - "tap-surface": a full-screen tap target (taps).
-  //  - "motion": a motion/orientation sensor running for the duration.
-  input: "tap-surface" | "motion";
-  // Which sensor class the play screen instantiates (client maps this).
-  sensor: "taps" | "steps" | "spin" | "air-time";
+  // "counting" only — how the attempt screen collects input + which sensor.
+  input?: "tap-surface" | "motion";
+  sensor?: "taps" | "steps" | "spin" | "air-time";
   // Short imperative shown on the attempt screen.
   instruction: string;
-  // Format the accumulated raw score for display.
+  // Format the raw score for display.
   formatScore: (score: number) => string;
 }
 
@@ -311,6 +317,7 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
   taps: {
     gameId: "taps",
     direction: "higher",
+    kind: "counting",
     durationMs: 15000,
     input: "tap-surface",
     sensor: "taps",
@@ -320,6 +327,7 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
   steps: {
     gameId: "steps",
     direction: "higher",
+    kind: "counting",
     durationMs: 30000,
     input: "motion",
     sensor: "steps",
@@ -329,6 +337,7 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
   spin: {
     gameId: "spin",
     direction: "higher",
+    kind: "counting",
     durationMs: 20000,
     input: "motion",
     sensor: "spin",
@@ -338,11 +347,44 @@ export const OPEN_GAMES: Partial<Record<ChallengeId, OpenGameSpec>> = {
   "air-time": {
     gameId: "air-time",
     direction: "higher",
+    kind: "counting",
     durationMs: 30000,
     input: "motion",
     sensor: "air-time",
     instruction: "Toss the phone (carefully!) — total seconds airborne wins.",
     formatScore: (s) => `${s.toFixed(1)}s airborne`,
+  },
+  north: {
+    gameId: "north",
+    direction: "lower", // smallest angular error wins
+    kind: "north",
+    durationMs: 0,
+    instruction: "Aim the top of your phone at TRUE NORTH, then lock in.",
+    formatScore: (s) => `${s.toFixed(0)}° off`,
+  },
+  "time-guess": {
+    gameId: "time-guess",
+    direction: "lower", // smallest deviation wins
+    kind: "time-guess",
+    durationMs: 30000, // target elapsed time
+    instruction: "Tap GO, wait what feels right, tap STOP at the target time.",
+    formatScore: (s) => `${(s / 1000).toFixed(2)}s off`,
+  },
+  flappy: {
+    gameId: "flappy",
+    direction: "higher",
+    kind: "flappy",
+    durationMs: 0,
+    instruction: "Yell to fly, dodge the pipes. One life — how far can you get?",
+    formatScore: (s) => `${Math.floor(s)}m`,
+  },
+  trivia: {
+    gameId: "trivia",
+    direction: "higher",
+    kind: "trivia",
+    durationMs: 0,
+    instruction: "Answer every question. Most correct wins.",
+    formatScore: (s) => `${Math.floor(s)} correct`,
   },
 };
 
@@ -352,14 +394,17 @@ export function isOpenGame(id: ChallengeId): boolean {
 }
 
 /**
- * Default game list for a freshly-created OPEN event: one of each supported
- * open-play game, threshold seeded with its attempt duration (ms).
+ * Default game list for a freshly-created OPEN event. Includes every zero-config
+ * open-play game (threshold seeded with its tunable number). Trivia is excluded
+ * — it needs questions the host must author first.
  */
 export function defaultOpenGames(): RoundConfig[] {
-  return (Object.values(OPEN_GAMES) as OpenGameSpec[]).map((spec) => ({
-    challenge: spec.gameId,
-    threshold: spec.durationMs,
-  }));
+  return (Object.values(OPEN_GAMES) as OpenGameSpec[])
+    .filter((spec) => spec.kind !== "trivia")
+    .map((spec) => ({
+      challenge: spec.gameId,
+      threshold: spec.durationMs,
+    }));
 }
 
 /**

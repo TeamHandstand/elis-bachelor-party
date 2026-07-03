@@ -7,10 +7,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import SoloAttempt from "@/components/challenge/SoloAttempt";
+import NorthAttempt from "@/components/challenge/open/NorthAttempt";
+import TimeGuessAttempt from "@/components/challenge/open/TimeGuessAttempt";
+import FlappyAttempt from "@/components/challenge/open/FlappyAttempt";
+import TriviaAttempt from "@/components/challenge/open/TriviaAttempt";
 import { CHALLENGES, OPEN_GAMES, isOpenGame } from "@/lib/challenges";
 import { formatPoints } from "@/lib/scoring";
 import { normalizeEventCode } from "@/lib/utils/code";
-import type { ChallengeId } from "@/lib/types";
+import type { ChallengeId, TriviaQuestion } from "@/lib/types";
 import type {
   GetEventResponse,
   OpenLeaderboardResponse,
@@ -80,15 +84,22 @@ export default function OpenGamePage() {
     })();
   }, [code, myPlayerId, gameId, loadBoard, router]);
 
-  const durationMs = useMemo(() => {
-    const round = event?.event.rounds.find((r) => r.challenge === gameId);
-    return round?.threshold ?? spec?.durationMs ?? 15000;
-  }, [event, gameId, spec]);
+  const round = useMemo(
+    () => event?.event.rounds.find((r) => r.challenge === gameId),
+    [event, gameId],
+  );
+  const durationMs = round?.threshold ?? spec?.durationMs ?? 15000;
+  const triviaQuestions: TriviaQuestion[] = round?.questions ?? [];
 
   const handleSubmit = useCallback(
-    async (score: number) => {
+    async (score: number, scoreMeta?: Record<string, unknown>) => {
       if (!myPlayerId) throw new Error("Not joined");
-      const body: SubmitOpenScoreRequest = { playerId: myPlayerId, gameId, score };
+      const body: SubmitOpenScoreRequest = {
+        playerId: myPlayerId,
+        gameId,
+        score,
+        ...(scoreMeta ? { meta: scoreMeta } : {}),
+      };
       const res = await fetch(`/api/events/${code}/open/score`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -133,8 +144,20 @@ export default function OpenGamePage() {
         <div className="text-center opacity-60 py-16">loading…</div>
       )}
 
-      {screen === "play" && (
-        <SoloAttempt gameId={gameId} durationMs={durationMs} onSubmit={handleSubmit} />
+      {screen === "play" && spec && (
+        <>
+          {spec.kind === "counting" && (
+            <SoloAttempt gameId={gameId} durationMs={durationMs} onSubmit={handleSubmit} />
+          )}
+          {spec.kind === "north" && <NorthAttempt onSubmit={handleSubmit} />}
+          {spec.kind === "time-guess" && (
+            <TimeGuessAttempt targetMs={durationMs} onSubmit={handleSubmit} />
+          )}
+          {spec.kind === "flappy" && <FlappyAttempt onSubmit={handleSubmit} />}
+          {spec.kind === "trivia" && (
+            <TriviaAttempt questions={triviaQuestions} onSubmit={handleSubmit} />
+          )}
+        </>
       )}
 
       {screen === "done" && (
