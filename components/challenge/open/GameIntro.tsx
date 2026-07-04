@@ -1,7 +1,9 @@
 "use client";
 
 // Reusable "how to play" card shown before a game starts: emoji, blurb, and
-// numbered steps, plus the START button.
+// numbered steps, plus the START button. When `onPractice` is provided it also
+// renders a secondary "practice first" button so a player can rehearse the game
+// as many times as they like before their single real attempt.
 
 export default function GameIntro({
   emoji,
@@ -11,6 +13,8 @@ export default function GameIntro({
   onStart,
   startLabel = "START",
   footer,
+  onPractice,
+  practiceLabel = "PRACTICE FIRST",
 }: {
   emoji: string;
   title: string;
@@ -19,6 +23,8 @@ export default function GameIntro({
   onStart: () => void;
   startLabel?: string;
   footer?: string;
+  onPractice?: () => void;
+  practiceLabel?: string;
 }) {
   return (
     <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5">
@@ -39,13 +45,30 @@ export default function GameIntro({
         ))}
       </ol>
 
-      <button
-        type="button"
-        onClick={onStart}
-        className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest"
-      >
-        {startLabel} ▶
-      </button>
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={onStart}
+          className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest"
+        >
+          {startLabel} ▶
+        </button>
+        {onPractice ? (
+          <>
+            <button
+              type="button"
+              onClick={onPractice}
+              className="w-full py-3 rounded-2xl bg-bg-deep border-2 border-dashed border-accent-orange/70 font-display text-base font-extrabold tracking-widest text-accent-orange"
+            >
+              🧪 {practiceLabel}
+            </button>
+            <div className="text-[11px] opacity-60 text-center leading-snug">
+              Practice is a test run — it doesn&apos;t count and you can replay it as
+              many times as you want. {startLabel} is your one real attempt.
+            </div>
+          </>
+        ) : null}
+      </div>
       {footer ? <div className="text-[11px] opacity-50 text-center">{footer}</div> : null}
     </div>
   );

@@ -15,6 +15,7 @@ import { RotationCounter } from "@/lib/sensors/rotation-counter";
 import { AirTimeDetector } from "@/lib/sensors/air-time";
 import GameIntro from "@/components/challenge/open/GameIntro";
 import CountdownRing from "@/components/challenge/open/CountdownRing";
+import { PracticeBanner, PracticeControls } from "@/components/challenge/open/PracticeUI";
 
 type Phase = "idle" | "running" | "done";
 
@@ -32,6 +33,7 @@ export default function SoloAttempt({
   const isTaps = spec?.input === "tap-surface";
 
   const [phase, setPhase] = useState<Phase>("idle");
+  const [practice, setPractice] = useState(false);
   const [display, setDisplay] = useState(0);
   const [remainingMs, setRemainingMs] = useState(durationMs);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +126,7 @@ export default function SoloAttempt({
     );
   }
 
-  async function handleStart() {
+  function resetForRun() {
     setError(null);
     scoreRef.current = 0;
     finalScoreRef.current = 0;
@@ -132,6 +134,11 @@ export default function SoloAttempt({
     setRemainingMs(durationMs);
     setLeftDown(false);
     setRightDown(false);
+  }
+
+  async function handleStart(practiceMode = false) {
+    setPractice(practiceMode);
+    resetForRun();
 
     if (spec!.input === "motion") {
       const probe: CountingSensor =
@@ -149,6 +156,18 @@ export default function SoloAttempt({
       }
     }
     setPhase("running");
+  }
+
+  // Practice: motion permission was already granted on the first run, so jump
+  // straight back into another attempt without re-prompting.
+  function restartPractice() {
+    resetForRun();
+    setPhase("running");
+  }
+
+  function exitPractice() {
+    setPractice(false);
+    setPhase("idle");
   }
 
   async function handleSubmit() {
@@ -171,8 +190,9 @@ export default function SoloAttempt({
           title={titleFor(gameId)}
           blurb={spec.instruction}
           steps={spec.howTo}
-          onStart={handleStart}
-          footer={`One attempt · ${Math.round(durationMs / 1000)} seconds`}
+          onStart={() => handleStart(false)}
+          onPractice={() => handleStart(true)}
+          footer={`One real attempt · ${Math.round(durationMs / 1000)} seconds`}
         />
         {error && <div className="text-accent-pink text-sm text-center">{error}</div>}
       </div>
@@ -182,24 +202,31 @@ export default function SoloAttempt({
   if (phase === "done") {
     return (
       <div className="flex flex-col gap-4">
+        {practice && <PracticeBanner />}
         <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center">
           <div className="text-xs uppercase tracking-widest opacity-60">
-            time! your score
+            {practice ? "practice run · you scored" : "time! your score"}
           </div>
           <div className="font-display text-4xl font-extrabold">
             {spec.formatScore(finalScoreRef.current)}
           </div>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
-          >
-            {submitting ? "SAVING…" : "SUBMIT 🔒"}
-          </button>
-          <div className="text-[11px] opacity-50">
-            You only get one shot — this locks in your score.
-          </div>
+          {practice ? (
+            <PracticeControls onPlayAgain={restartPractice} onExit={exitPractice} />
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
+              >
+                {submitting ? "SAVING…" : "SUBMIT 🔒"}
+              </button>
+              <div className="text-[11px] opacity-50">
+                You only get one shot — this locks in your score.
+              </div>
+            </>
+          )}
         </div>
         {error && <div className="text-accent-pink text-sm text-center">{error}</div>}
       </div>
@@ -209,6 +236,11 @@ export default function SoloAttempt({
   // phase === "running"
   return (
     <div className="flex flex-col items-center gap-4">
+      {practice && (
+        <div className="w-full">
+          <PracticeBanner />
+        </div>
+      )}
       <CountdownRing remainingMs={remainingMs} totalMs={durationMs} />
 
       <div className="text-center">
