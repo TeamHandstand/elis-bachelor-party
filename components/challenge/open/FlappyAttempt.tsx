@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { DbMeter } from "@/lib/sensors/db-meter";
 import { FLAPPY_CONFIG } from "@/components/challenge/flappy-config";
 import GameIntro from "@/components/challenge/open/GameIntro";
+import { PracticeBanner, PracticeControls } from "@/components/challenge/open/PracticeUI";
 import { OPEN_GAMES } from "@/lib/challenges";
 
 type Phase = "idle" | "playing" | "between" | "done";
@@ -35,6 +36,7 @@ export default function FlappyAttempt({
   onSubmit: (score: number, meta?: Record<string, unknown>) => Promise<void> | void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
+  const [practice, setPractice] = useState(false);
   const [meters, setMeters] = useState(0); // current life
   const [db, setDb] = useState(0);
   const [livesUsed, setLivesUsed] = useState(0);
@@ -221,7 +223,7 @@ export default function FlappyAttempt({
     };
   }, [phase, size.w, size.h]);
 
-  async function begin() {
+  async function begin(practiceMode = false) {
     setError(null);
     const ok = await sensorRef.current!.requestPermission().catch(() => false);
     if (!ok) {
@@ -232,6 +234,7 @@ export default function FlappyAttempt({
     micUnsubRef.current = await sensorRef.current!.start((level) => {
       dbRef.current = level;
     });
+    setPractice(practiceMode);
     totalRef.current = 0;
     livesUsedRef.current = 0;
     setTotal(0);
@@ -243,6 +246,24 @@ export default function FlappyAttempt({
   function nextLife() {
     setMeters(0);
     setPhase("playing");
+  }
+
+  // Practice: mic stream is still alive, so replay all 3 lives without re-prompting.
+  function restartPractice() {
+    totalRef.current = 0;
+    livesUsedRef.current = 0;
+    setTotal(0);
+    setLivesUsed(0);
+    setMeters(0);
+    setPhase("playing");
+  }
+
+  function exitPractice() {
+    // Drop the mic; a real run re-requests it in begin().
+    micUnsubRef.current?.();
+    micUnsubRef.current = null;
+    setPractice(false);
+    setPhase("idle");
   }
 
   async function submit() {
@@ -269,7 +290,8 @@ export default function FlappyAttempt({
           title="Scream Bird"
           blurb={OPEN_GAMES.flappy!.instruction}
           steps={OPEN_GAMES.flappy!.howTo}
-          onStart={begin}
+          onStart={() => begin(false)}
+          onPractice={() => begin(true)}
           startLabel="START LIFE 1"
           footer="3 lives — your meters add up. Find a room where you can be loud."
         />
@@ -280,7 +302,9 @@ export default function FlappyAttempt({
 
   if (phase === "between") {
     return (
-      <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-4 text-center">
+      <div className="flex flex-col gap-4">
+        {practice && <PracticeBanner />}
+        <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-4 text-center">
         <div className="text-5xl">💀</div>
         <div className="text-xs uppercase tracking-widest opacity-60">
           life {livesUsed} down · you flew
@@ -301,30 +325,44 @@ export default function FlappyAttempt({
         >
           START LIFE {livesUsed + 1} ▶
         </button>
+        </div>
       </div>
     );
   }
 
   if (phase === "done") {
     return (
-      <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center">
-        <div className="text-5xl">🏁</div>
-        <div className="text-xs uppercase tracking-widest opacity-60">
-          all 3 lives done · total distance
+      <div className="flex flex-col gap-4">
+        {practice && <PracticeBanner />}
+        <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center">
+          <div className="text-5xl">🏁</div>
+          <div className="text-xs uppercase tracking-widest opacity-60">
+            {practice ? "practice run · total distance" : "all 3 lives done · total distance"}
+          </div>
+          <div className="font-display text-5xl font-extrabold text-accent-orange">
+            {total}m
+          </div>
+          {practice ? (
+            <PracticeControls
+              onPlayAgain={restartPractice}
+              onExit={exitPractice}
+              playAgainLabel="PRACTICE AGAIN (3 LIVES) 🔁"
+            />
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={submitting}
+                className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
+              >
+                {submitting ? "SAVING…" : "SUBMIT 🔒"}
+              </button>
+              <div className="text-[11px] opacity-50">This locks in your total.</div>
+            </>
+          )}
+          {error && <div className="text-accent-pink text-sm">{error}</div>}
         </div>
-        <div className="font-display text-5xl font-extrabold text-accent-orange">
-          {total}m
-        </div>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={submitting}
-          className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
-        >
-          {submitting ? "SAVING…" : "SUBMIT 🔒"}
-        </button>
-        <div className="text-[11px] opacity-50">This locks in your total.</div>
-        {error && <div className="text-accent-pink text-sm">{error}</div>}
       </div>
     );
   }
@@ -332,6 +370,11 @@ export default function FlappyAttempt({
   // phase === "playing"
   return (
     <div className="flex flex-col">
+      {practice && (
+        <div className="pb-2">
+          <PracticeBanner />
+        </div>
+      )}
       <div className="flex items-center justify-between px-1 pb-2">
         <div className="text-sm">
           life <b>{livesUsed + 1}</b>/{LIVES} · {"🐦".repeat(livesLeft)}

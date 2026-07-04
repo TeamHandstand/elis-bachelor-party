@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import GameIntro from "@/components/challenge/open/GameIntro";
+import { PracticeBanner, PracticeControls } from "@/components/challenge/open/PracticeUI";
 import { OPEN_GAMES } from "@/lib/challenges";
 
 type Phase = "idle" | "aiming" | "done";
@@ -37,6 +38,7 @@ export default function NorthAttempt({
   onSubmit: (score: number, meta?: Record<string, unknown>) => Promise<void> | void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
+  const [practice, setPractice] = useState(false);
   const [liveHeading, setLiveHeading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [finalError, setFinalError] = useState(0);
@@ -66,14 +68,26 @@ export default function NorthAttempt({
     };
   }, [phase]);
 
-  async function start() {
+  async function start(practiceMode = false) {
     setError(null);
     const ok = await requestOrientationPerm().catch(() => false);
     if (!ok) {
       setError("Compass access denied — enable Motion & Orientation and retry.");
       return;
     }
+    setPractice(practiceMode);
     setPhase("aiming");
+  }
+
+  // Practice: compass permission already granted, so re-aim without re-prompting.
+  function restartPractice() {
+    setError(null);
+    setPhase("aiming");
+  }
+
+  function exitPractice() {
+    setPractice(false);
+    setPhase("idle");
   }
 
   function lockIn() {
@@ -105,7 +119,8 @@ export default function NorthAttempt({
             title="Due North"
             blurb={OPEN_GAMES.north!.instruction}
             steps={OPEN_GAMES.north!.howTo}
-            onStart={start}
+            onStart={() => start(false)}
+            onPractice={() => start(true)}
             footer="Uses your phone's compass — you'll get a permission popup."
           />
         </div>
@@ -113,6 +128,7 @@ export default function NorthAttempt({
 
       {phase === "aiming" && (
         <div className="flex flex-col items-center gap-4 w-full">
+          {practice && <PracticeBanner />}
           <div className="relative w-64 h-64 my-2">
             <div className="absolute inset-0 rounded-full bg-bg-card border-2 border-accent-orange/30" />
             <svg
@@ -161,23 +177,32 @@ export default function NorthAttempt({
       )}
 
       {phase === "done" && (
-        <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center w-full">
-          <div className="text-xs uppercase tracking-widest opacity-60">
-            locked in · you were
-          </div>
-          <div className="font-display text-4xl font-extrabold">
-            {finalError.toFixed(0)}° off
-          </div>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting}
-            className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
-          >
-            {submitting ? "SAVING…" : "SUBMIT 🔒"}
-          </button>
-          <div className="text-[11px] opacity-50">
-            One shot — this locks in your guess.
+        <div className="flex flex-col gap-4 w-full">
+          {practice && <PracticeBanner />}
+          <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center w-full">
+            <div className="text-xs uppercase tracking-widest opacity-60">
+              {practice ? "practice run · you were" : "locked in · you were"}
+            </div>
+            <div className="font-display text-4xl font-extrabold">
+              {finalError.toFixed(0)}° off
+            </div>
+            {practice ? (
+              <PracticeControls onPlayAgain={restartPractice} onExit={exitPractice} />
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={submitting}
+                  className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
+                >
+                  {submitting ? "SAVING…" : "SUBMIT 🔒"}
+                </button>
+                <div className="text-[11px] opacity-50">
+                  One shot — this locks in your guess.
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

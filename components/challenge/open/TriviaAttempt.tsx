@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import { OPEN_GAMES, scoreTriviaAnswers } from "@/lib/challenges";
 import type { TriviaQuestion } from "@/lib/types";
 import GameIntro from "@/components/challenge/open/GameIntro";
+import { PracticeBanner, PracticeControls } from "@/components/challenge/open/PracticeUI";
 
 type Phase = "intro" | "answering" | "done";
 
@@ -21,6 +22,7 @@ export default function TriviaAttempt({
 }) {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [phase, setPhase] = useState<Phase>("intro");
+  const [practice, setPractice] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +55,12 @@ export default function TriviaAttempt({
   }
 
   async function submit() {
+    // Practice never submits or reveals the correct answers — it just lets the
+    // player rehearse the flow, then loops back or exits to the real attempt.
+    if (practice) {
+      setPhase("done");
+      return;
+    }
     if (submitting) return;
     setSubmitting(true);
     setError(null);
@@ -65,6 +73,17 @@ export default function TriviaAttempt({
     }
   }
 
+  function restartPractice() {
+    setAnswers({});
+    setPhase("answering");
+  }
+
+  function exitPractice() {
+    setPractice(false);
+    setAnswers({});
+    setPhase("intro");
+  }
+
   if (phase === "intro") {
     return (
       <GameIntro
@@ -72,14 +91,44 @@ export default function TriviaAttempt({
         title="Trivia"
         blurb={`${questions.length} question${questions.length === 1 ? "" : "s"} — how many can you get right?`}
         steps={OPEN_GAMES.trivia!.howTo}
-        onStart={() => setPhase("answering")}
+        onStart={() => {
+          setPractice(false);
+          setPhase("answering");
+        }}
+        onPractice={() => {
+          setPractice(true);
+          setAnswers({});
+          setPhase("answering");
+        }}
         startLabel="LET'S GO"
       />
     );
   }
 
+  // Practice finished: show a plain "you're ready" card without grading, so the
+  // correct answers stay hidden for the one real attempt.
+  if (practice && phase === "done") {
+    return (
+      <div className="flex flex-col gap-4">
+        <PracticeBanner />
+        <div className="rounded-2xl bg-bg-card p-6 flex flex-col gap-5 text-center">
+          <div className="text-5xl">🧠</div>
+          <div className="font-display text-xl font-extrabold">
+            Practice run done!
+          </div>
+          <div className="text-sm opacity-70 leading-snug">
+            You tapped through all {questions.length}. Answers stay hidden in
+            practice — your real attempt is the one that counts.
+          </div>
+          <PracticeControls onPlayAgain={restartPractice} onExit={exitPractice} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-3 pb-28">
+      {practice && <PracticeBanner />}
       <div className="rounded-2xl bg-bg-card border border-white/10 px-4 py-3 flex items-center justify-between">
         <div className="text-xs opacity-70 font-bold">
           {phase === "done" ? "your answers are locked in" : "answer them all, then submit"}
@@ -146,7 +195,7 @@ export default function TriviaAttempt({
 
       {phase === "answering" && (
         <div className="fixed bottom-0 left-0 right-0 bg-bg-deep/95 backdrop-blur border-t border-white/10 p-4 flex flex-col items-center gap-2 z-20">
-          {answeredCount < questions.length && (
+          {!practice && answeredCount < questions.length && (
             <div className="text-[10px] uppercase tracking-widest text-accent-pink">
               {questions.length - answeredCount} unanswered — those count as wrong
             </div>
@@ -157,9 +206,11 @@ export default function TriviaAttempt({
             disabled={submitting}
             className="w-full max-w-md py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
           >
-            {submitting ? "SAVING…" : "SUBMIT 🔒"}
+            {practice ? "FINISH PRACTICE 🧪" : submitting ? "SAVING…" : "SUBMIT 🔒"}
           </button>
-          <div className="text-[10px] opacity-60">one shot — locks in your answers</div>
+          <div className="text-[10px] opacity-60">
+            {practice ? "practice run — nothing is saved" : "one shot — locks in your answers"}
+          </div>
         </div>
       )}
 

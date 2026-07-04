@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import GameIntro from "@/components/challenge/open/GameIntro";
+import { PracticeBanner, PracticeControls } from "@/components/challenge/open/PracticeUI";
 import { OPEN_GAMES } from "@/lib/challenges";
 
 type Phase = "intro" | "running" | "done";
@@ -18,6 +19,7 @@ export default function TimeGuessAttempt({
   onSubmit: (score: number, meta?: Record<string, unknown>) => Promise<void> | void;
 }) {
   const [phase, setPhase] = useState<Phase>("intro");
+  const [practice, setPractice] = useState(false);
   const [deviation, setDeviation] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,9 +39,15 @@ export default function TimeGuessAttempt({
     return () => cancelAnimationFrame(raf);
   }, [phase]);
 
-  function go() {
+  function go(practiceMode = false) {
+    setPractice(practiceMode);
     startedAtRef.current = performance.now();
     setPhase("running");
+  }
+
+  function exitPractice() {
+    setPractice(false);
+    setPhase("intro");
   }
 
   function stop() {
@@ -69,7 +77,8 @@ export default function TimeGuessAttempt({
           title="Guess The Time"
           blurb={`Your target is ${seconds} seconds. Nail it as closely as you can — no clocks allowed.`}
           steps={OPEN_GAMES["time-guess"]!.howTo}
-          onStart={go}
+          onStart={() => go(false)}
+          onPractice={() => go(true)}
           startLabel="GO"
           footer="The timer is hidden the whole time. Trust your gut."
         />
@@ -80,6 +89,11 @@ export default function TimeGuessAttempt({
 
   return (
     <div className="flex flex-col items-center gap-4 text-center">
+      {practice && (
+        <div className="w-full text-left">
+          <PracticeBanner />
+        </div>
+      )}
       <div className="text-xs uppercase tracking-widest opacity-70 mt-2">target</div>
       <div className="font-display text-5xl font-extrabold tabular-nums">{seconds}s</div>
 
@@ -112,18 +126,24 @@ export default function TimeGuessAttempt({
 
       {phase === "done" && (
         <div className="mt-4 rounded-2xl bg-bg-card p-6 flex flex-col gap-5 w-full">
-          <div className="text-xs uppercase tracking-widest opacity-60">you were off by</div>
+          <div className="text-xs uppercase tracking-widest opacity-60">
+            {practice ? "practice run · you were off by" : "you were off by"}
+          </div>
           <div className="font-display text-4xl font-extrabold">
             {(deviation / 1000).toFixed(2)}s
           </div>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting}
-            className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
-          >
-            {submitting ? "SAVING…" : "SUBMIT 🔒"}
-          </button>
+          {practice ? (
+            <PracticeControls onPlayAgain={() => go(true)} onExit={exitPractice} />
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={submitting}
+              className="w-full py-4 rounded-2xl bg-gradient-party font-display text-xl font-extrabold tracking-widest disabled:opacity-50"
+            >
+              {submitting ? "SAVING…" : "SUBMIT 🔒"}
+            </button>
+          )}
         </div>
       )}
 
